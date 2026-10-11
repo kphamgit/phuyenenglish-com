@@ -1,6 +1,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import ClozeExplanation from "./explanations/ClozeExplanation";
+import ClozeGrammarCheck from "./explanations/ClozeGrammarCheck";
 import Explanation from "./explanations/Explanation";
 import {type QuestionAttemptAssesmentResultsProps} from "./shared/types"
 import ButtonSelectExplanation from "./explanations/ButtonSelectExplanation";
@@ -59,6 +60,13 @@ function IncorrectModal({ parentCallback, format, answer_key, content, explanati
         <Explanation>
             {(format === 1 || format == 2 ) && 
                 <ClozeExplanation  content={content} processQuestionResults={processQuestionResults} />}
+            {(format === 1 || format === 2) &&
+                <div className="mt-3 text-left text-gray-700">
+                    <span className="font-semibold">Your answer: </span>
+                    <ClozeExplanation content={content} processQuestionResults={processQuestionResults} mode="user_answer" />
+                </div>}
+            {(format === 1 || format === 2) && processQuestionResults?.error_flag &&
+                <ClozeGrammarCheck content={content} processQuestionResults={processQuestionResults} />}
             {format === 3 && <ButtonSelectExplanation content={content} answer_key={answer_key} processQuestionResults={processQuestionResults} />}
             {format === 4 && <RadioExplanation content={content} answer_key={answer_key} processQuestionResults={processQuestionResults} />}
             {format === 5 && <CheckboxExplanation content={content} answer_key={answer_key} processQuestionResults={processQuestionResults} />}

@@ -16,6 +16,10 @@ import { useWebSocket } from "../components/context/WebSocketContext";
 import type { WebSocketMessageProps, VideoSegment, MarkedWord } from "../components/shared/types";
 import { useUserConnections } from "../components/context/UserConnectionsContext";
 import { Outlet, useLocation } from "react-router-dom";
+
+export type HomeStudentOutletContext = {
+    setFinishedQuizPath: (path: string) => void;
+};
 import AssignmentModal from "../components/AssignmentModal";
 import CardReview from "../components/CardReview";
 import TakeVideoQuizLive from "../components/TakeVideoQuizLive";
@@ -47,8 +51,17 @@ function HomeStudent() {
     const {liveQuizId, liveQuestionNumber, setLiveQuizId} = useUserConnections();
 
     // While the student is on a take-quiz route, disable the Navbar so they leave via "Terminate Quiz".
+    // TakeQuiz reports the path of a quiz it finished (via Outlet context), so the Navbar is
+    // re-enabled on the "Quiz Completed" screen. Starting another quiz is a new path, so it's
+    // disabled again. Any navigation also clears it, so retaking the same quiz (same path) is disabled too.
     const location = useLocation();
-    const inQuiz = /\/take_(video_)?quiz\//.test(location.pathname);
+    const [finishedQuizPath, setFinishedQuizPath] = useState<string | null>(null);
+    const [prevPathname, setPrevPathname] = useState(location.pathname);
+    if (prevPathname !== location.pathname) {
+        setPrevPathname(location.pathname);
+        setFinishedQuizPath(null);
+    }
+    const inQuiz = /\/take_(video_|reading_)?quiz\//.test(location.pathname) && finishedQuizPath !== location.pathname;
     // Keep the latest live_quiz_id readable inside async callbacks (the welcome_message may set it
     // shortly after mount, e.g. when reconnecting into a live quiz already in progress).
     const liveQuizIdRef = useRef(liveQuizId);
@@ -339,7 +352,7 @@ function HomeStudent() {
                             </button>
                         </div>
                     )}
-                    <Outlet />
+                    <Outlet context={{ setFinishedQuizPath } satisfies HomeStudentOutletContext} />
                     </>
                 }
 
@@ -406,7 +419,7 @@ return (
                     {liveQuizId &&
                         <TakeQuizLive parent_callback={live_question_attempt_finished} quiz_id={liveQuizId} question_number={liveQuestionNumber} />
                     }
-                    <Outlet />
+                    <Outlet context={{ setFinishedQuizPath } satisfies HomeStudentOutletContext} />
                 </div>
                 <div className="flex flex-col">
                     <div className="bg-blue-200">

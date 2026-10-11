@@ -5,6 +5,7 @@ import { useWebSocket } from '../context/WebSocketContext';
 import { useSelector } from 'react-redux';
 import VoiceAnswerRecorder from './VoiceAnswerRecorder';
 import { FaAngleDoubleRight } from 'react-icons/fa';
+import { ttsTextOf, playPromptTts } from './tts';
 //import type { WebSocketMessageProps } from '../shared/types';
 //import type { RootState } from '../../redux/store';
 //import type { WebSocketMessageProps } from '../shared/types';
@@ -90,6 +91,12 @@ const VIETNAMESE_REGEX = /[À-ÃÈ-ÊÌÍÒ-ÕÙÚÝà-ãè-êìíò-õùúýĂ�
           const isSR = chatMessage.text?.trim().startsWith("SR") ?? false;
           setInputDisabled(isSR); // SR => force voice (disable typing); otherwise allow typing
           setMicDisabled(false);  // re-open the mic for the new question
+          // Auto-play the recording prompt the moment the student receives it
+          // (Google TTS, Neural2-F, 0.75x). The Play button is the fallback if the
+          // browser blocks autoplay.
+          if (isSR) {
+            playPromptTts(ttsTextOf(chatMessage.text));
+          }
         }
 
       }

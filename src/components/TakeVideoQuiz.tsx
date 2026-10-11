@@ -1,4 +1,5 @@
-import { useLocation, useParams, useNavigate } from 'react-router-dom';
+import { useLocation, useParams, useNavigate, useOutletContext } from 'react-router-dom';
+import type { HomeStudentOutletContext } from '../pages/HomeStudent';
 import CustomYoutubePlayer from './shared/CustomYoutubePlayer';
 import { useEffect, useRef, useState } from 'react';
 import api from '../api';
@@ -98,6 +99,12 @@ export default function TakeVideoQuiz() {
 
   let correctModalTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [endOfQuiz, setEndOfQuiz] = useState<boolean>(false);
+
+  // quiz is over -> re-enable the Navbar (it's disabled while on a take-quiz route)
+  const outletContext = useOutletContext<HomeStudentOutletContext | undefined>();
+  useEffect(() => {
+    if (endOfQuiz) outletContext?.setFinishedQuizPath(location.pathname);
+  }, [endOfQuiz, outletContext, location.pathname]);
 
   //const [reviewMode, setReviewMode] = useState<boolean>(false);
   const reviewModeRef = useRef<boolean>(false);

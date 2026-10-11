@@ -3,6 +3,7 @@ import { useSelector } from 'react-redux';
 import api from '../../api';
 //import { MessageProps } from './ChatPage';
 import { type ChatProps } from './ChatPage';
+import { ttsTextOf, playPromptTts } from './tts';
 
 
 const ChatBody = (props: { messages: ChatProps[] }) => {
@@ -77,6 +78,16 @@ const ChatBody = (props: { messages: ChatProps[] }) => {
                     <span className='text-sm' style={{ color: '#5C4033' }}> — {vietnamesePart}</span>
                   )}
                 </p>
+                {/* Recording prompt: let the student hear it (Google TTS, Neural2-F, 0.75x). */}
+                {isSR && (
+                  <button
+                    onClick={() => playPromptTts(ttsTextOf(message.text))}
+                    className="mt-1 text-xs px-2 py-1 rounded bg-purple-600 hover:bg-purple-700 text-white"
+                    title="Play this prompt"
+                  >
+                    ▶ Play
+                  </button>
+                )}
                 {/* Recorded voice answer — replay it (mainly for the teacher to score) */}
                 {message.audio_url && (
                   deletedAudios.has(message.audio_url) ? (

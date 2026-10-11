@@ -9,7 +9,8 @@ import { AnimatePresence, motion } from 'framer-motion';
 //import TimeoutModal from './TImeOutModal';
 import CorrectModal from './CorrectModal';
 
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation, useOutletContext } from 'react-router-dom';
+import type { HomeStudentOutletContext } from '../pages/HomeStudent';
 import { type ProcessQuestionAttemptResultsProps, type QuestionAttemptAssesmentResultsProps, type QuestionProps, type QuizAttemptProps } from './shared/types';
 //import { processQuestion } from './processQuestion';
 import IncorrectModal from './IncorrectModal';
@@ -54,6 +55,8 @@ const TakeQuiz: React.FC<{ readingHtml?: string }> = ({ readingHtml }) => {
 
   const { category_id, quiz_id } = useParams<{ category_id: string, quiz_id: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
+  const outletContext = useOutletContext<HomeStudentOutletContext | undefined>();
 
   const { name } = useSelector((state: RootState) => state.user);
   const dispatch = useDispatch();
@@ -116,6 +119,7 @@ const TakeQuiz: React.FC<{ readingHtml?: string }> = ({ readingHtml }) => {
   api.post(`/api/quiz_attempts/${quizAttempt.id}/mark_completed/`)
     .catch(err => console.error("Error marking quiz attempt as completed.", err));
   if (quiz_id) dispatch(removeAssignment(Number(quiz_id)));
+  outletContext?.setFinishedQuizPath(location.pathname); // quiz is over -> re-enable the Navbar
 }, [endOfQuiz]);
 
 const handleFeedbackModalClose = () => {
