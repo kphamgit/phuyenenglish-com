@@ -1,4 +1,5 @@
-import { useState, useEffect, Fragment, type ReactNode } from "react";
+import { useState, useEffect, Fragment } from "react";
+import { renderVietPron } from "./vietPron";
 import { useSelector } from "react-redux";
 import { FaPlayCircle } from "react-icons/fa";
 import api from "../api";
@@ -38,65 +39,8 @@ const parseVietProns = (raw: string | null | undefined): string[] => {
   }
 };
 
-// Trailing combos that render smaller when they follow a hyphen at the very end of an alternative.
-const SMALL_TAILS = ["ần", "ờm", "ồ", "ờn", "ừm"];
-// Weak parts to de-emphasize (small + dark brown) wherever they appear mid-string. Each rule finds
-// `match`; the first `keep` characters render normally and the remainder renders de-emphasized
-// (e.g. in "t(h)" only "(h)" shrinks, so keep = 1). Optional `show` overrides the de-emphasized
-// text — e.g. match "t(h)" but display just "h" (drop the parentheses).
-// TO UNDO the parentheses removal: delete `show: "h"` from the "t(h)" rule below.
-const SMALL_MIDDLES: { match: string; keep: number; show?: string }[] = [
-  { match: "-ần-", keep: 0 },
-  { match: "-ờm-", keep: 0 },
-  { match: "t(h)", keep: 1, show: "h" },
-];
-
-// Render one Vietnamese pronunciation alternative, de-emphasizing certain weak parts:
-//  - a middle marker from SMALL_MIDDLES (e.g. "-ần-", or the "(h)" in "t(h)"), shown small + brown,
-//  - a trailing combo from SMALL_TAILS after a hyphen (e.g. "-ồ" / "-ờn"), shown smaller.
-const renderVietPron = (raw: string): ReactNode => {
-  const s = raw.normalize("NFC");
-
-  // Peel off a trailing weak combo first, so only the combo (not its hyphen) shrinks.
-  const tail = SMALL_TAILS.find((t) => s.endsWith("-" + t));
-  const head = tail ? s.slice(0, s.length - tail.length) : s;
-
-  // Find the earliest occurrence of any middle marker at/after position `from`.
-  const nextMiddle = (from: number): { at: number; rule: (typeof SMALL_MIDDLES)[number] } | null => {
-    let best: { at: number; rule: (typeof SMALL_MIDDLES)[number] } | null = null;
-    for (const rule of SMALL_MIDDLES) {
-      const at = head.indexOf(rule.match, from);
-      if (at !== -1 && (best === null || at < best.at)) best = { at, rule };
-    }
-    return best;
-  };
-
-  // Split the head around each middle marker; the de-emphasized remainder renders small + dark brown.
-  const nodes: ReactNode[] = [];
-  let i = 0;
-  let k = 0;
-  let hit = nextMiddle(i);
-  while (hit) {
-    const { at, rule } = hit;
-    // Text before the match, plus the leading portion of the match that stays normal.
-    if (at + rule.keep > i) nodes.push(head.slice(i, at + rule.keep));
-    nodes.push(
-      <span key={`m${k++}`} className="text-[0.8em] text-[#5a3825]">
-        {rule.show ?? rule.match.slice(rule.keep)}
-      </span>
-    );
-    i = at + rule.match.length;
-    hit = nextMiddle(i);
-  }
-  if (i < head.length) nodes.push(head.slice(i));
-
-  return (
-    <>
-      {nodes}
-      {tail && <span className="text-[0.8em]">{tail}</span>}
-    </>
-  );
-};
+// renderVietPron (small/brown (h)/(r)/(v) + shrunk tails) now lives in ./vietPron,
+// shared with the student's SR prompt display.
 export interface DictEntry {
   head_word: string;
   hyphenated?: string; // syllable-hyphenated form of the head word (e.g. "dic-tio-nar-y")
@@ -127,6 +71,19 @@ export default function DictionaryLookup({ mode = "student" }: { mode?: "student
   const [canAdd, setCanAdd] = useState(false);
   // Teacher: the entry currently open in the edit modal (null = closed).
   const [editingEntry, setEditingEntry] = useState<DictEntry | null>(null);
+  // Teacher: which pronunciation's "Copy" was just clicked (for brief feedback).
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
+  // Copy the RAW viet_pron_code (parentheses included, e.g. "t(h)ai-ờm"), wrapped in
+  // "/.../" so it drops straight into an SR prompt as a pronunciation guide and renders
+  // identically to the dictionary. The on-screen display drops the parens, so a plain
+  // text-selection copy would lose them.
+  const copyRawPron = (raw: string, key: string) => {
+    navigator.clipboard.writeText(`/${raw}/`).then(() => {
+      setCopiedKey(key);
+      setTimeout(() => setCopiedKey((k) => (k === key ? null : k)), 1200);
+    }).catch((err) => console.error("Copy failed:", err));
+  };
 
   useEffect(() => {
     api.get("/api/me/")
@@ -382,6 +339,24 @@ export default function DictionaryLookup({ mode = "student" }: { mode?: "student
                       /
                     </span>
                   )}
+                  {/* Teacher-only: the RAW viet_pron_code (parens intact) + a Copy button, so an
+                      SR prompt can be pasted with its "(h)" markers preserved. */}
+                  {isTeacher && parseVietProns(pos.viet_pron_code).length > 0 && (() => {
+                    const raw = parseVietProns(pos.viet_pron_code).join(", ");
+                    const key = `${ei}-${pi}`;
+                    return (
+                      <span className="ml-2 inline-flex items-center gap-1 align-middle">
+                        <code className="text-xs text-gray-600 bg-gray-100 border border-gray-200 rounded px-1 py-0.5">{raw}</code>
+                        <button
+                          onClick={() => copyRawPron(raw, key)}
+                          title="Copy the raw pronunciation (with parentheses) for an SR prompt"
+                          className="text-xs px-1.5 py-0.5 rounded bg-gray-600 hover:bg-gray-800 text-white"
+                        >
+                          {copiedKey === key ? "Copied!" : "Copy"}
+                        </button>
+                      </span>
+                    );
+                  })()}
                   <ol className="list-decimal list-inside mt-1 space-y-1">
                     {pos.senses?.map((sense) => (
                       <li key={sense.id} className={`text-gray-800 ${isTeacher ? "text-base" : "text-sm"}`}>

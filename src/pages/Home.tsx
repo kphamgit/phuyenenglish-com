@@ -96,6 +96,11 @@ function Home() {
                 }
                 if (data.message_type === "chat") {
                     //console.log("MessageController: Received chat message from server:. ");
+                    // Ignore our own broadcast echo (the sender already shows its own message).
+                    if (data.user_name === name) return;
+                    // SR (speech-recognition) prompts are handled centrally by HomeStudent — shown
+                    // centered with a fixed mic — not in the chat box, so don't open/route them here.
+                    if ((data.content ?? '').toString().trim().startsWith("SR")) return;
                     setIsChatOpen((prevIsChatOpen) => {
                         if (!prevIsChatOpen) {
                             //console.log("Home: Chat box is closed. Opening chat box to display new message.");

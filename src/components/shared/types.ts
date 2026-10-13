@@ -113,6 +113,7 @@ export interface WebSocketMessageProps extends BaseWebSocketMessageProps {
   live_question_number: string; // for quiz host to identify which question the message is related to, and for students to identify which question to answer
   audio_url?: string; // for chat voice answers: presigned S3 url of the recorded audio
   marked_words?: MarkedWord[]; // for live_text: words the teacher marked as "to learn" (in context)
+  voice?: string; // for SR prompts: the Neural2 voice the teacher chose for TTS playback
 }
 
 export interface QuestionProps {

@@ -28,6 +28,9 @@ import SingleCardReview, { type ReviewCard } from "../components/SingleCardRevie
 import DefinitionPopup from "../components/DefinitionPopup";
 import DictionaryLookup from "../components/DictionaryLookup";
 import TranslationBox from "../components/TranslationBox";
+import VoiceAnswerRecorder from "../components/chat/VoiceAnswerRecorder";
+import { ttsTextOf, playPromptTts, stripSsml, shouldSkipTts } from "../components/chat/tts";
+import { renderVietPron } from "../components/vietPron";
 
 function HomeStudent() {
     const [levels, setLevels] = useState<LevelProps[]>([]);
@@ -47,6 +50,20 @@ function HomeStudent() {
     const [definitionCard, setDefinitionCard] = useState<{ card: ReviewCard; autoPlay: boolean; audioMissing: boolean; surfaceWord: string } | null>(null);
     // Words the teacher marked "to learn" in the pushed text; shown to the student as buttons.
     const [liveTextMarkedWords, setLiveTextMarkedWords] = useState<MarkedWord[]>([]);
+
+    // Recording / speech-recognition (SR), moved out of the chat box. The teacher sends an
+    // "SR ..." chat message; the student answers by voice using the fixed bottom mic, and both
+    // the prompt and the student's own transcript are shown centered here (not in the chat box).
+    const [srPrompt, setSrPrompt] = useState<string | null>(null);         // SSML-stripped text, for display
+    const [srPromptRaw, setSrPromptRaw] = useState<string | null>(null);   // original (may contain SSML), for TTS
+    const [srAnswer, setSrAnswer] = useState<{ english: string; vietnamese: string | null; audioUrl?: string } | null>(null);
+    const [srMicDisabled, setSrMicDisabled] = useState<boolean>(false);
+    // true when the prompt carries a "/.../" pronunciation help or a "(...)" note,
+    // in which case we do NOT speak it (no auto-play, no Play button).
+    const [srSkipTts, setSrSkipTts] = useState<boolean>(false);
+    // The Neural2 voice the teacher chose for this prompt; used for every playback (auto-play
+    // and the Play button) so the student hears the same voice each time.
+    const [srVoice, setSrVoice] = useState<string | undefined>(undefined);
 
     const {liveQuizId, liveQuestionNumber, setLiveQuizId} = useUserConnections();
 
@@ -131,6 +148,28 @@ function HomeStudent() {
              setIsLiveVideoQuiz(false);
              //setLiveQuestionNumber(undefined);
         }
+        else if (data.message_type === "chat") {
+            // SR (speech-recognition) prompt from the teacher: show it centered and enable the
+            // fixed bottom mic. Ignore our own echo and ordinary (non-SR) chat (the chat box
+            // handles that). Auto-play the prompt (Google TTS, random Neural2 voice, 0.75x).
+            const text = (data.content ?? '').toString();
+            if (data.user_name !== name && text.trim().startsWith("SR")) {
+                const withoutSR = text.trim().replace(/^SR\s*/, '');
+                const display = stripSsml(withoutSR);
+                // A "/.../" pronunciation help means this isn't a plain sentence to speak.
+                const skipTts = shouldSkipTts(display);
+                setSrPrompt(display);              // strip SSML tags for display
+                setSrPromptRaw(withoutSR);         // keep raw (SSML) for TTS playback
+                setSrAnswer(null);
+                setSrMicDisabled(false);
+                setSrVoice(data.voice);
+                setSrSkipTts(skipTts);
+                chimeAudioRef.current?.play().catch(() => {});
+                if (!skipTts) {
+                    playPromptTts(ttsTextOf(text), data.voice); // pass raw SSML to Google TTS
+                }
+            }
+        }
       }
       // Subscribe to the "message" event
       eventEmitter?.on("message", handleMessage);
@@ -173,6 +212,29 @@ function HomeStudent() {
                 .then((res) => { card = res.data; maybeShow(); })
                 .catch((err) => console.error("Error adding sense card to review:", err));
         }
+    };
+
+    // A recorded SR answer: send it to the teacher over the WebSocket (so it appears in the
+    // teacher's chat box), show the student's own transcript centered under the prompt, and lock
+    // the mic (one attempt per prompt).
+    const handleSrTranscribed = (transcript: string, audioUrl?: string, translation?: string) => {
+        if (!transcript || transcript.trim().length === 0) return;
+        const text = translation && translation.trim()
+            ? `${transcript.trim()} — ${translation.trim()}`
+            : transcript.trim();
+        const ws = websocketRef.current;
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+                message_type: 'chat',
+                content: text,
+                user_name: name,
+                audio_url: audioUrl,
+            }));
+        } else {
+            console.error('HomeStudent: WebSocket not connected; cannot send answer.');
+        }
+        setSrAnswer({ english: transcript.trim(), vietnamese: translation?.trim() || null, audioUrl });
+        setSrMicDisabled(true);
     };
 
     // Render the pushed text, turning each marked occurrence (located by its character offset)
@@ -352,15 +414,70 @@ function HomeStudent() {
                             </button>
                         </div>
                     )}
+                    {/* Recording / speech-recognition prompt from the teacher, shown centered.
+                        The student answers with the fixed bottom mic; the transcript appears below. */}
+                    {srPrompt && !inQuiz && (
+                        <div className="flex flex-col items-center my-4">
+                            <div className="w-full max-w-2xl bg-purple-50 border-2 border-purple-400 rounded-lg shadow-lg p-6 text-center">
+                                <p className="text-xs uppercase tracking-wide text-purple-700 font-semibold mb-2">
+                                    Record your answer
+                                </p>
+                                <p className="text-2xl font-bold text-purple-800 leading-snug">{renderVietPron(srPrompt)}</p>
+                                {/* No TTS when the prompt carries a "/.../" pronunciation help. */}
+                                {!srSkipTts && (
+                                    <button
+                                        onClick={() => playPromptTts(ttsTextOf(srPromptRaw ?? srPrompt), srVoice)}
+                                        className="mt-3 text-sm px-3 py-1 rounded bg-purple-600 hover:bg-purple-700 text-white"
+                                        title="Play this prompt"
+                                    >
+                                        ▶ Play
+                                    </button>
+                                )}
+                                {srAnswer && (
+                                    <div className="mt-4 pt-4 border-t border-purple-200">
+                                        <p className="text-xs uppercase tracking-wide text-gray-500 mb-1">Your answer</p>
+                                        <p className="text-lg text-gray-800">{srAnswer.english}</p>
+                                        {srAnswer.vietnamese && (
+                                            <p className="text-sm" style={{ color: '#5C4033' }}>{srAnswer.vietnamese}</p>
+                                        )}
+                                        {srAnswer.audioUrl && (
+                                            <audio controls src={srAnswer.audioUrl} className="mt-2 w-full h-8" />
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                            <button
+                                onClick={() => { setSrPrompt(null); setSrPromptRaw(null); setSrAnswer(null); }}
+                                className="mt-2 px-4 py-1 rounded-md bg-gray-600 hover:bg-gray-800 text-white text-sm"
+                            >
+                                Dismiss
+                            </button>
+                        </div>
+                    )}
                     <Outlet context={{ setFinishedQuizPath } satisfies HomeStudentOutletContext} />
                     </>
                 }
 
             </div>
 
-            {/* Translation helper — pinned at the very bottom of the home page, left-aligned.
+            {/* Fixed bottom bar: TranslationBox on the left, mic button on the right.
                 Hidden during a live quiz or while taking a quiz. */}
-            {!liveQuizId && !inQuiz && <TranslationBox />}
+            {!liveQuizId && !inQuiz && (
+                <div className="fixed bottom-4 left-4 right-4 z-30 flex items-end justify-start gap-4">
+                    <TranslationBox />
+                    <div className="flex items-center gap-3 rounded-full border-2 border-purple-300 bg-white/95 px-4 py-2 shadow-lg shrink-0">
+                        <span className="text-sm text-gray-600">
+                            {srMicDisabled ? 'Answer sent' : srPrompt ? 'Tap the mic to record' : 'Waiting for a prompt…'}
+                        </span>
+                        <VoiceAnswerRecorder
+                            onTranscribed={handleSrTranscribed}
+                            userName={name}
+                            disabled={!srPrompt || srMicDisabled}
+                            highlight={!!srPrompt && !srMicDisabled}
+                        />
+                    </div>
+                </div>
+            )}
 
             {/* Vocabulary review pops up on login when cards are due (not during a live quiz). */}
             {showVocabReview && !liveQuizId && (

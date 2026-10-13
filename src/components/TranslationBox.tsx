@@ -27,7 +27,13 @@ export default function TranslationBox() {
   };
 
   return (
-    <div className="max-w-2xl ml-4 my-4 p-3 bg-white rounded-md border border-gray-300">
+    <div className="relative w-[720px] p-3 bg-white rounded-md border border-gray-300 shadow-lg">
+      {/* Result pops up above the input so it isn't clipped by the screen bottom. */}
+      {result !== null && (
+        <div className="absolute bottom-full mb-2 left-0 right-0 p-2 bg-gray-50 border border-gray-200 rounded-md whitespace-pre-wrap text-gray-800 shadow-md">
+          {result}
+        </div>
+      )}
       {/* Input and Translate button on one line to keep the box short. */}
       <div className="flex items-center gap-2">
         <input
@@ -47,11 +53,6 @@ export default function TranslationBox() {
           {loading ? "Translating…" : "Translate"}
         </button>
       </div>
-      {result !== null && (
-        <div className="mt-2 p-2 bg-gray-50 border border-gray-200 rounded-md whitespace-pre-wrap text-gray-800">
-          {result}
-        </div>
-      )}
     </div>
   );
 }

@@ -78,10 +78,11 @@ const ChatBody = (props: { messages: ChatProps[] }) => {
                     <span className='text-sm' style={{ color: '#5C4033' }}> — {vietnamesePart}</span>
                   )}
                 </p>
-                {/* Recording prompt: let the student hear it (Google TTS, Neural2-F, 0.75x). */}
+                {/* Recording prompt: play it (Google TTS, 0.75x) in the voice chosen for this
+                    message, so the teacher's preview matches what the student will hear. */}
                 {isSR && (
                   <button
-                    onClick={() => playPromptTts(ttsTextOf(message.text))}
+                    onClick={() => playPromptTts(ttsTextOf(message.text), message.voice)}
                     className="mt-1 text-xs px-2 py-1 rounded bg-purple-600 hover:bg-purple-700 text-white"
                     title="Play this prompt"
                   >

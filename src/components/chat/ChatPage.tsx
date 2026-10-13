@@ -3,9 +3,8 @@ import { useEffect, useImperativeHandle, useState } from 'react';
 import ChatBody from './ChatBody';
 import { useWebSocket } from '../context/WebSocketContext';
 import { useSelector } from 'react-redux';
-import VoiceAnswerRecorder from './VoiceAnswerRecorder';
 import { FaAngleDoubleRight } from 'react-icons/fa';
-import { ttsTextOf, playPromptTts } from './tts';
+import { NEURAL2_VOICES } from './tts';
 //import type { WebSocketMessageProps } from '../shared/types';
 //import type { RootState } from '../../redux/store';
 //import type { WebSocketMessageProps } from '../shared/types';
@@ -28,6 +27,7 @@ export interface ChatProps {
     text?: string;
     user_name: string;
     audio_url?: string; // presigned S3 url of a recorded voice answer (for the teacher to replay)
+    voice?: string; // SR prompts: the Neural2 voice chosen for TTS playback (so Play isn't random)
   }
 
 // Vietnamese-specific letters (đ ă ơ ư, â ê ô, and every tone-marked vowel). English never uses
@@ -48,12 +48,9 @@ const VIETNAMESE_REGEX = /[À-ÃÈ-ÊÌÍÒ-ÕÙÚÝà-ãè-êìíò-õùúýĂ�
     // Inline error shown under the composer when a student tries to send non-English text.
     const [langError, setLangError] = useState<string | null>(null);
 
-    // When the teacher sends a message beginning with "SR", the student must answer by voice:
-    // the text input is disabled until they respond.
-    const [inputDisabled, setInputDisabled] = useState<boolean>(false);
-    // The mic is locked after the student submits one recorded answer (no retries), and re-opens
-    // when the teacher sends a new message.
-    const [micDisabled, setMicDisabled] = useState<boolean>(false);
+    // Teacher-only: the Neural2 voice attached to an SR prompt, so the student always hears the
+    // same voice for that message (instead of a random one per Play click).
+    const [srVoice, setSrVoice] = useState<string>('en-US-Neural2-F');
 
     const {websocketRef} = useWebSocket();
     
@@ -85,19 +82,6 @@ const VIETNAMESE_REGEX = /[À-ÃÈ-ÊÌÍÒ-ÕÙÚÝà-ãè-êìíò-õùúýĂ�
         setIncomingMessages((prevMessages) => {
           return [...prevMessages, chat]
           });
-
-        // Student side: a new teacher message opens a fresh answer opportunity.
-        if (name !== "teacher") {
-          const isSR = chatMessage.text?.trim().startsWith("SR") ?? false;
-          setInputDisabled(isSR); // SR => force voice (disable typing); otherwise allow typing
-          setMicDisabled(false);  // re-open the mic for the new question
-          // Auto-play the recording prompt the moment the student receives it
-          // (Google TTS, Neural2-F, 0.75x). The Play button is the fallback if the
-          // browser blocks autoplay.
-          if (isSR) {
-            playPromptTts(ttsTextOf(chatMessage.text));
-          }
-        }
 
       }
     }, [chat])
@@ -142,7 +126,7 @@ const VIETNAMESE_REGEX = /[À-ÃÈ-ÊÌÍÒ-ÕÙÚÝà-ãè-êìíò-õùúýĂ�
     // Send an arbitrary piece of text as a chat message. `audioUrl` (optional) is the S3 link of a
     // recorded voice answer, so the teacher can replay it. `echoLocally` controls whether the sender
     // also sees the message in their own chat body.
-    const sendText = (text: string, echoLocally: boolean = true, audioUrl?: string) => {
+    const sendText = (text: string, echoLocally: boolean = true, audioUrl?: string, voice?: string) => {
       if (!text || text.trim().length === 0) return;
       if (!websocketRef.current || websocketRef.current.readyState !== WebSocket.OPEN) {
         alert('ChatPage: WebSocket is not connected');
@@ -153,12 +137,13 @@ const VIETNAMESE_REGEX = /[À-ÃÈ-ÊÌÍÒ-ÕÙÚÝà-ãè-êìíò-õùúýĂ�
         content: text,
         user_name: name, // You can replace this with the actual user name from your state
         audio_url: audioUrl, // forwarded verbatim by the ws-server's general broadcast
+        voice, // SR prompts carry the teacher's chosen Neural2 voice (also forwarded verbatim)
       };
       websocketRef.current.send(JSON.stringify(messageToSend));
       if (echoLocally) {
         setIncomingMessages((prevMessages) => [
           ...prevMessages,
-          { text, user_name: name, audio_url: audioUrl },
+          { text, user_name: name, audio_url: audioUrl, voice },
         ]);
       }
     };
@@ -169,13 +154,11 @@ const VIETNAMESE_REGEX = /[À-ÃÈ-ÊÌÍÒ-ÕÙÚÝà-ãè-êìíò-õùúýĂ�
     // Reset the composer after a message is sent.
     const clearComposer = () => {
       setOutgoingMessage('');
-      setInputDisabled(false); // re-enable typing after the student has responded
     };
 
     const sendChatMessage = () => {
       // Students must chat in English; reject typed messages containing Vietnamese characters.
-      // (The teacher is exempt, and the voice-answer flow — which appends a Vietnamese translation
-      // — goes through handleVoiceTranscribed, not here.)
+      // (The teacher is exempt. The recorded voice-answer flow now lives in HomeStudent, not here.)
       if (isStudent && VIETNAMESE_REGEX.test(outgoingMessage)) {
         setLangError("Please chat in English only — Vietnamese isn't allowed here.");
         return; // keep the text so the student can rewrite it
@@ -185,34 +168,17 @@ const VIETNAMESE_REGEX = /[À-ÃÈ-ÊÌÍÒ-ÕÙÚÝà-ãè-êìíò-õùúýĂ�
       clearComposer();
     };
 
-    // Teacher-only: prepend "SR" so the student is forced to answer by voice.
+    // Teacher-only: prepend "SR" so the student is forced to answer by voice. The chosen Neural2
+    // voice rides along so the student hears that same voice on every playback.
     const sendSRMessage = () => {
       const srText = outgoingMessage.trim() ? `SR ${outgoingMessage.trim()}` : 'SR';
-      sendText(srText);
+      sendText(srText, true, undefined, srVoice);
       clearComposer();
     };
 
-    // Student: a recorded answer has been saved to S3 and transcribed on the server. Show the
-    // transcript to the student (echoed into the chat) and send it to the teacher, then LOCK the
-    // mic so they can't re-record. (audioUrl is the S3 link, available for future use e.g. replay.)
-    const handleVoiceTranscribed = (transcript: string, audioUrl?: string, translation?: string) => {
-      // Empty/failed transcription: leave the mic available AND keep the input disabled, so the
-      // student must re-record (they can't type a "fake" transcription while the mic is open).
-      if (!transcript || transcript.trim().length === 0) return;
-      // Append the Vietnamese translation inline (ChatBody renders in a <p>, so keep it one line).
-      const text = translation && translation.trim()
-        ? `${transcript} — ${translation.trim()}`
-        : transcript;
-      // Send transcript (+ translation) + audio url; echoed to the student too so they see it.
-      sendText(text, true, audioUrl);
-      setMicDisabled(true);    // one attempt only — no retrying for a better transcription
-      setInputDisabled(false); // answer accepted → re-enable typing
-    };
-
-  
     return (
       <div
-        className={`absolute bottom-[15px] right-[15px] bg-white shadow-lg border border-gray-300 rounded-lg ${isStudent ? 'w-[334px]' : 'w-[440px]'} h-[268px] flex flex-col z-20`}
+        className={`absolute bottom-[15px] right-[15px] bg-white shadow-lg border border-gray-300 rounded-lg ${isStudent ? 'w-[334px]' : 'w-[440px]'} ${isStudent ? 'h-[268px]' : 'h-[340px]'} flex flex-col z-20`}
       >
           {/* Close arrow — sticks to the right edge of the chat window */}
           <button
@@ -231,45 +197,47 @@ const VIETNAMESE_REGEX = /[À-ÃÈ-ÊÌÍÒ-ÕÙÚÝà-ãè-êìíò-õùúýĂ�
                 <ChatBody messages={incomingMessages} />
               </div>
 
-              {/* Input, voice recorder, and Send button */}
+              {/* Composer: textarea + buttons */}
               <div className="p-2 border-t border-gray-300 bg-gray-100">
-                <div className="flex items-center gap-2">
+                <textarea
+                  className="w-full bg-gray-200 text-black p-2 rounded-md text-sm resize-none"
+                  rows={isStudent ? 2 : 3}
+                  placeholder={isStudent ? "Type your message…" : "Type a message or paste SSML (<speak>…</speak>)…"}
+                  value={outgoingMessage}
+                  onChange={(e) => { setOutgoingMessage(e.target.value); if (langError) setLangError(null); }}
+                />
+                {langError && (
+                  <p className="mt-1 text-xs text-red-600">{langError}</p>
+                )}
+                <div className="flex items-center gap-2 mt-1">
                   <button
-                    className="bg-blue-500 text-white p-2 rounded-md hover:bg-blue-600"
+                    className="bg-blue-500 text-white px-3 py-1 rounded-md hover:bg-blue-600 text-sm"
                     onClick={sendChatMessage}
                   >
                     Send
                   </button>
-                  <input
-                    disabled={inputDisabled}
-                    className={`flex-1 bg-gray-200 text-black p-2 rounded-md ${inputDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
-                    placeholder={inputDisabled ? 'Typing disabled — please speak your reply' : 'Type or speak your message...'}
-                    value={outgoingMessage}
-                    onChange={(e) => { setOutgoingMessage(e.target.value); if (langError) setLangError(null); }}
-                  />
-                  {/* Student: record a spoken answer; it's transcribed on the server and sent to the teacher.
-                      Locked after one attempt (micDisabled) until the teacher sends a new message. */}
-                  {isStudent && (
-                    <VoiceAnswerRecorder
-                      onTranscribed={handleVoiceTranscribed}
-                      userName={name}
-                      disabled={micDisabled}
-                      highlight={inputDisabled && !micDisabled}
-                    />
-                  )}
-                  {/* Teacher-only: send a message that forces the student to answer by voice */}
+                  {/* Teacher-only: voice picker + Send SR */}
                   {!isStudent && (
-                    <button
-                      className="bg-purple-600 text-white p-2 rounded-md hover:bg-purple-700"
-                      onClick={sendSRMessage}
-                    >
-                      Send SR
-                    </button>
+                    <>
+                      <select
+                        value={srVoice}
+                        onChange={(e) => setSrVoice(e.target.value)}
+                        title="Voice for the SR prompt"
+                        className="flex-1 bg-gray-200 text-black text-sm p-1 rounded-md"
+                      >
+                        {NEURAL2_VOICES.map((v) => (
+                          <option key={v} value={v}>{v.replace('en-US-Neural2-', 'Voice ')}</option>
+                        ))}
+                      </select>
+                      <button
+                        className="bg-purple-600 text-white px-3 py-1 rounded-md hover:bg-purple-700 text-sm"
+                        onClick={sendSRMessage}
+                      >
+                        Send SR
+                      </button>
+                    </>
                   )}
                 </div>
-                {langError && (
-                  <p className="mt-1 text-xs text-red-600">{langError}</p>
-                )}
               </div>
             </div>
           </>
