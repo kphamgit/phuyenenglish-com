@@ -5,6 +5,7 @@ import { useWebSocket } from '../context/WebSocketContext';
 import { useSelector } from 'react-redux';
 import { FaAngleDoubleRight } from 'react-icons/fa';
 import { NEURAL2_VOICES } from './tts';
+import SsmlConvertModal from './SsmlConvertModal';
 //import type { WebSocketMessageProps } from '../shared/types';
 //import type { RootState } from '../../redux/store';
 //import type { WebSocketMessageProps } from '../shared/types';
@@ -28,6 +29,7 @@ export interface ChatProps {
     user_name: string;
     audio_url?: string; // presigned S3 url of a recorded voice answer (for the teacher to replay)
     voice?: string; // SR prompts: the Neural2 voice chosen for TTS playback (so Play isn't random)
+    no_audio?: boolean; // SR prompts sent with "SR No Audio": no TTS for the student (no auto-play, no Play)
   }
 
 // Vietnamese-specific letters (đ ă ơ ư, â ê ô, and every tone-marked vowel). English never uses
@@ -51,6 +53,9 @@ const VIETNAMESE_REGEX = /[À-ÃÈ-ÊÌÍÒ-ÕÙÚÝà-ãè-êìíò-õùúýĂ�
     // Teacher-only: the Neural2 voice attached to an SR prompt, so the student always hears the
     // same voice for that message (instead of a random one per Play click).
     const [srVoice, setSrVoice] = useState<string>('en-US-Neural2-F');
+
+    // Teacher-only: SSML Convert modal (sentence -> clickable word buttons).
+    const [showSsmlModal, setShowSsmlModal] = useState(false);
 
     const {websocketRef} = useWebSocket();
     
@@ -126,7 +131,7 @@ const VIETNAMESE_REGEX = /[À-ÃÈ-ÊÌÍÒ-ÕÙÚÝà-ãè-êìíò-õùúýĂ�
     // Send an arbitrary piece of text as a chat message. `audioUrl` (optional) is the S3 link of a
     // recorded voice answer, so the teacher can replay it. `echoLocally` controls whether the sender
     // also sees the message in their own chat body.
-    const sendText = (text: string, echoLocally: boolean = true, audioUrl?: string, voice?: string) => {
+    const sendText = (text: string, echoLocally: boolean = true, audioUrl?: string, voice?: string, noAudio?: boolean) => {
       if (!text || text.trim().length === 0) return;
       if (!websocketRef.current || websocketRef.current.readyState !== WebSocket.OPEN) {
         alert('ChatPage: WebSocket is not connected');
@@ -138,12 +143,13 @@ const VIETNAMESE_REGEX = /[À-ÃÈ-ÊÌÍÒ-ÕÙÚÝà-ãè-êìíò-õùúýĂ�
         user_name: name, // You can replace this with the actual user name from your state
         audio_url: audioUrl, // forwarded verbatim by the ws-server's general broadcast
         voice, // SR prompts carry the teacher's chosen Neural2 voice (also forwarded verbatim)
+        no_audio: noAudio, // "SR No Audio": the student gets the prompt + mic, but no TTS
       };
       websocketRef.current.send(JSON.stringify(messageToSend));
       if (echoLocally) {
         setIncomingMessages((prevMessages) => [
           ...prevMessages,
-          { text, user_name: name, audio_url: audioUrl, voice },
+          { text, user_name: name, audio_url: audioUrl, voice, no_audio: noAudio },
         ]);
       }
     };
@@ -173,6 +179,14 @@ const VIETNAMESE_REGEX = /[À-ÃÈ-ÊÌÍÒ-ÕÙÚÝà-ãè-êìíò-õùúýĂ�
     const sendSRMessage = () => {
       const srText = outgoingMessage.trim() ? `SR ${outgoingMessage.trim()}` : 'SR';
       sendText(srText, true, undefined, srVoice);
+      clearComposer();
+    };
+
+    // Teacher-only: like Send SR, but the student hears no audio (no auto-play, no Play button);
+    // the mic is still enabled so they can record and send back an answer.
+    const sendSRNoAudioMessage = () => {
+      const srText = outgoingMessage.trim() ? `SR ${outgoingMessage.trim()}` : 'SR';
+      sendText(srText, true, undefined, undefined, true);
       clearComposer();
     };
 
@@ -209,7 +223,7 @@ const VIETNAMESE_REGEX = /[À-ÃÈ-ÊÌÍÒ-ÕÙÚÝà-ãè-êìíò-õùúýĂ�
                 {langError && (
                   <p className="mt-1 text-xs text-red-600">{langError}</p>
                 )}
-                <div className="flex items-center gap-2 mt-1">
+                <div className="flex flex-wrap items-center gap-2 mt-1">
                   <button
                     className="bg-blue-500 text-white px-3 py-1 rounded-md hover:bg-blue-600 text-sm"
                     onClick={sendChatMessage}
@@ -230,10 +244,23 @@ const VIETNAMESE_REGEX = /[À-ÃÈ-ÊÌÍÒ-ÕÙÚÝà-ãè-êìíò-õùúýĂ�
                         ))}
                       </select>
                       <button
+                        className="bg-teal-600 text-white px-3 py-1 rounded-md hover:bg-teal-700 text-sm"
+                        onClick={() => setShowSsmlModal(true)}
+                      >
+                        SSML Convert
+                      </button>
+                      <button
                         className="bg-purple-600 text-white px-3 py-1 rounded-md hover:bg-purple-700 text-sm"
                         onClick={sendSRMessage}
                       >
                         Send SR
+                      </button>
+                      <button
+                        className="bg-purple-400 text-white px-3 py-1 rounded-md hover:bg-purple-500 text-sm"
+                        onClick={sendSRNoAudioMessage}
+                        title="Send an SR prompt without audio — the student only reads it and records an answer"
+                      >
+                        SR No Audio
                       </button>
                     </>
                   )}
@@ -241,7 +268,8 @@ const VIETNAMESE_REGEX = /[À-ÃÈ-ÊÌÍÒ-ÕÙÚÝà-ãè-êìíò-õùúýĂ�
               </div>
             </div>
           </>
-        
+
+        {showSsmlModal && <SsmlConvertModal onClose={() => setShowSsmlModal(false)} />}
       </div>
     );
   };

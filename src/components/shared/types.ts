@@ -114,6 +114,7 @@ export interface WebSocketMessageProps extends BaseWebSocketMessageProps {
   audio_url?: string; // for chat voice answers: presigned S3 url of the recorded audio
   marked_words?: MarkedWord[]; // for live_text: words the teacher marked as "to learn" (in context)
   voice?: string; // for SR prompts: the Neural2 voice the teacher chose for TTS playback
+  no_audio?: boolean; // for SR prompts: "SR No Audio" — don't play the prompt to the student (mic still on)
 }
 
 export interface QuestionProps {

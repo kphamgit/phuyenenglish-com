@@ -156,8 +156,9 @@ function HomeStudent() {
             if (data.user_name !== name && text.trim().startsWith("SR")) {
                 const withoutSR = text.trim().replace(/^SR\s*/, '');
                 const display = stripSsml(withoutSR);
-                // A "/.../" pronunciation help means this isn't a plain sentence to speak.
-                const skipTts = shouldSkipTts(display);
+                // A "/.../" pronunciation help means this isn't a plain sentence to speak; an
+                // "SR No Audio" prompt (no_audio) is never spoken either. The mic is enabled regardless.
+                const skipTts = shouldSkipTts(display) || !!data.no_audio;
                 setSrPrompt(display);              // strip SSML tags for display
                 setSrPromptRaw(withoutSR);         // keep raw (SSML) for TTS playback
                 setSrAnswer(null);
@@ -461,9 +462,11 @@ function HomeStudent() {
             </div>
 
             {/* Fixed bottom bar: TranslationBox on the left, mic button on the right.
-                Hidden during a live quiz or while taking a quiz. */}
+                Hidden during a live quiz or while taking a quiz.
+                The bar spans the full width, so its empty area is click-through (pointer-events-none)
+                — otherwise it covers the chat box's Send button. Its children stay clickable. */}
             {!liveQuizId && !inQuiz && (
-                <div className="fixed bottom-4 left-4 right-4 z-30 flex items-end justify-start gap-4">
+                <div className="fixed bottom-4 left-4 right-4 z-30 flex items-end justify-start gap-4 pointer-events-none *:pointer-events-auto">
                     <TranslationBox />
                     <div className="flex items-center gap-3 rounded-full border-2 border-purple-300 bg-white/95 px-4 py-2 shadow-lg shrink-0">
                         <span className="text-sm text-gray-600">

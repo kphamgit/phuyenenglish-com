@@ -109,7 +109,7 @@ function Home() {
                         return prevIsChatOpen; // Keep the current state
                     });
                     //console.log("Home: Received chat message from server, setting chatMessage state to:", { text: data.content, user_name: data.user_name });
-                    setChatMessage({ text: data.content, user_name: data.user_name, audio_url: data.audio_url });
+                    setChatMessage({ text: data.content, user_name: data.user_name, audio_url: data.audio_url, voice: data.voice, no_audio: data.no_audio });
                 }
             }
             // Subscribe to the "message" event

@@ -80,7 +80,11 @@ const ChatBody = (props: { messages: ChatProps[] }) => {
                 </p>
                 {/* Recording prompt: play it (Google TTS, 0.75x) in the voice chosen for this
                     message, so the teacher's preview matches what the student will hear. */}
-                {isSR && (
+                {/* "SR No Audio" prompts have no audio, so no Play button. */}
+                {isSR && message.no_audio && (
+                  <span className="mt-1 inline-block text-xs text-gray-500 italic">(no audio)</span>
+                )}
+                {isSR && !message.no_audio && (
                   <button
                     onClick={() => playPromptTts(ttsTextOf(message.text), message.voice)}
                     className="mt-1 text-xs px-2 py-1 rounded bg-purple-600 hover:bg-purple-700 text-white"
