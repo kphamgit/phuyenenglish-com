@@ -16,6 +16,7 @@ const SMALL_TAILS = ["ần", "ờm", "ồ", "ờn", "ừm"];
 const SMALL_MIDDLES: { match: string; keep: number; show?: string }[] = [
   { match: "-ần-", keep: 0 },
   { match: "-ờm-", keep: 0 },
+  { match: "-ờn-", keep: 0 },   // e.g. "réi-ờn-jhờ(r)" (ranger); word-final "-ờn" is in SMALL_TAILS
   { match: "(h)", keep: 0, show: "h" },   // aspiration mark: t(h), p(h), k(h) from the backend
   { match: "(r)", keep: 0 },   // e.g. "quố-đờ(r)": the whole "(r)" shrinks
   { match: "(v)", keep: 0 },   // the whole "(v)" shrinks, like "(r)"

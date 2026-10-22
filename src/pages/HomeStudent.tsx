@@ -27,7 +27,7 @@ import StudentLiveVideo from "../components/StudentLiveVideo";
 import SingleCardReview, { type ReviewCard } from "../components/SingleCardReview";
 import DefinitionPopup from "../components/DefinitionPopup";
 import DictionaryLookup from "../components/DictionaryLookup";
-import TranslationBox from "../components/TranslationBox";
+// import TranslationBox from "../components/TranslationBox";  // hidden for now (see the bottom bar)
 import VoiceAnswerRecorder from "../components/chat/VoiceAnswerRecorder";
 import { ttsTextOf, playPromptTts, stripSsml, shouldSkipTts } from "../components/chat/tts";
 import { renderVietPron } from "../components/vietPron";
@@ -467,7 +467,8 @@ function HomeStudent() {
                 — otherwise it covers the chat box's Send button. Its children stay clickable. */}
             {!liveQuizId && !inQuiz && (
                 <div className="fixed bottom-4 left-4 right-4 z-30 flex items-end justify-start gap-4 pointer-events-none *:pointer-events-auto">
-                    <TranslationBox />
+                    {/* Viet/English translation box — hidden for now. To bring it back, uncomment this and its import. */}
+                    {/* <TranslationBox /> */}
                     <div className="flex items-center gap-3 rounded-full border-2 border-purple-300 bg-white/95 px-4 py-2 shadow-lg shrink-0">
                         <span className="text-sm text-gray-600">
                             {srMicDisabled ? 'Answer sent' : srPrompt ? 'Tap the mic to record' : 'Waiting for a prompt…'}

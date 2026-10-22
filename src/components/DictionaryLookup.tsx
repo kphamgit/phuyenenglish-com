@@ -23,7 +23,8 @@ export interface DictPartOfSpeech {
   id?: number;          // used to attach auto-generated audio to this POS when creating a word
   name: string;
   audio_blob?: string;  // blob name (no ".mp3") set by the backend when audio was generated; "" = none
-  viet_pron_code?: string | null; // JSON-array string of Vietnamese pronunciation alternatives
+  viet_pron_code?: string | null; // JSON-array string: the American/flapped form (T -> đ)
+  viet_pron_code_standard?: string | null; // JSON-array string: the STANDARD/non-flapped form (keeps t)
   senses?: DictSense[];
 }
 
@@ -328,32 +329,48 @@ export default function DictionaryLookup({ mode = "student" }: { mode?: "student
                       <FaPlayCircle className="inline text-lg" />
                     </button>
                   )}
-                  {/* Vietnamese pronunciation (read-only), alternatives separated by " / ".
-                      Serif font so letters like l / i (e.g. in "all") stay distinguishable. */}
-                  {parseVietProns(pos.viet_pron_code).length > 0 && (
-                    <span className={`ml-2 text-[#5a3825] font-serif ${isTeacher ? "text-lg" : "text-base"}`}>
-                      /
-                      {parseVietProns(pos.viet_pron_code).map((p, i) => (
-                        <Fragment key={i}>{i > 0 && ", "}{renderVietPron(p)}</Fragment>
-                      ))}
-                      /
-                    </span>
-                  )}
-                  {/* Teacher-only: the RAW viet_pron_code (parens intact) + a Copy button, so an
-                      SR prompt can be pasted with its "(h)" markers preserved. */}
-                  {isTeacher && parseVietProns(pos.viet_pron_code).length > 0 && (() => {
-                    const raw = parseVietProns(pos.viet_pron_code).join(", ");
-                    const key = `${ei}-${pi}`;
+                  {/* Vietnamese pronunciation: STANDARD (non-flapped) first, AMERICAN (flapped,
+                      T->đ) only when it differs. Staff users (is_staff or student_staff) get a
+                      Copy button next to each form that copies the RAW code (parens intact,
+                      wrapped in /.../) for pasting into an SR prompt. */}
+                  {(() => {
+                    const standard = parseVietProns(pos.viet_pron_code_standard);
+                    const american = parseVietProns(pos.viet_pron_code);
+                    const primaryIsStandard = standard.length > 0;
+                    const primary = primaryIsStandard ? standard : american; // fallback if not backfilled
+                    if (primary.length === 0) return null;
+                    const differs = standard.length > 0 && american.length > 0
+                      && JSON.stringify(standard) !== JSON.stringify(american);
+                    const label = (t: string) => (
+                      <span className="text-[0.6em] uppercase tracking-wide text-gray-500 align-middle">{t}</span>
+                    );
+                    const pron = (list: string[]) => (
+                      <span className={`text-[#5a3825] font-serif ${isTeacher ? "text-lg" : "text-base"}`}>
+                        {"/"}
+                        {list.map((p, i) => (<Fragment key={i}>{i > 0 && ", "}{renderVietPron(p)}</Fragment>))}
+                        {"/"}
+                      </span>
+                    );
+                    const form = (list: string[], tag: string, key: string, showLabel: boolean) => (
+                      <span className="inline-flex items-center gap-x-1">
+                        {showLabel && label(tag)}
+                        {pron(list)}
+                        {canAdd && list.length > 0 && (
+                          <button
+                            onClick={() => copyRawPron(list.join(", "), key)}
+                            title={`Copy the raw ${tag} pronunciation (with parentheses) for an SR prompt`}
+                            className="text-[0.7em] px-1.5 py-0.5 rounded bg-gray-600 hover:bg-gray-800 text-white align-middle"
+                          >
+                            {copiedKey === key ? "Copied!" : "Copy"}
+                          </button>
+                        )}
+                      </span>
+                    );
                     return (
-                      <span className="ml-2 inline-flex items-center gap-1 align-middle">
-                        <code className="text-xs text-gray-600 bg-gray-100 border border-gray-200 rounded px-1 py-0.5">{raw}</code>
-                        <button
-                          onClick={() => copyRawPron(raw, key)}
-                          title="Copy the raw pronunciation (with parentheses) for an SR prompt"
-                          className="text-xs px-1.5 py-0.5 rounded bg-gray-600 hover:bg-gray-800 text-white"
-                        >
-                          {copiedKey === key ? "Copied!" : "Copy"}
-                        </button>
+                      <span className="ml-2 inline-flex flex-wrap items-center gap-x-3 gap-y-1">
+                        {form(primary, primaryIsStandard ? "Standard" : "American",
+                              primaryIsStandard ? `${ei}-${pi}-std` : `${ei}-${pi}-am`, differs)}
+                        {differs && form(american, "American", `${ei}-${pi}-am`, true)}
                       </span>
                     );
                   })()}

@@ -29,11 +29,16 @@ function Home() {
     // Which home to show is based on the user's real role (is_staff), not the username. We fetch
     // it once; until it loads we hold off on the teacher/student choice to avoid a flash.
     const [isStaff, setIsStaff] = useState(false);
+    // student_staff (a profile flag, not Django's is_staff): only shown in the welcome message here
+    const [isStudentStaff, setIsStudentStaff] = useState(false);
     const [roleLoaded, setRoleLoaded] = useState(false);
 
     useEffect(() => {
         api.get("/api/me/")
-            .then((res) => setIsStaff(!!res.data.is_staff))
+            .then((res) => {
+                setIsStaff(!!res.data.is_staff);
+                setIsStudentStaff(!!res.data.student_staff);
+            })
             .catch(() => setIsStaff(false))
             .finally(() => setRoleLoaded(true));
     }, []);
@@ -183,7 +188,9 @@ function Home() {
             <div className="relative min-h-screen">
 
                 <div className="text-red-800 mx-10 my-8">Welcome
-                    <span className="font-bold"> {name}</span> to
+                    <span className="font-bold"> {name}</span>
+                    {isStaff ? <span className="text-gray-600"> (staff)</span>
+                        : isStudentStaff && <span className="text-gray-600"> (student staff)</span>} to
                     <span className="text-blue-600"> tienganhphuyen.com</span>
                     <span className='text-md bg-amber-400 text-sm ml-3 p-2'>
                         <Link to="/logout">Log out</Link>
