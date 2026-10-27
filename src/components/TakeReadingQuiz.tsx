@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useOutletContext } from 'react-router-dom';
+import type { HomeStudentOutletContext } from '../pages/HomeStudent';
 import api from '../api';
 import ReadingDisplay from './ReadingDisplay';
 import TakeQuiz from './TakeQuiz';
@@ -9,6 +10,8 @@ import TakeQuiz from './TakeQuiz';
 export default function TakeReadingQuiz() {
   const { category_id, quiz_id } = useParams<{ category_id: string, quiz_id: string }>();
   const navigate = useNavigate();
+  // Set when running inside HomeStudent: clicking a vocabulary word adds its card to review.
+  const outletContext = useOutletContext<HomeStudentOutletContext | undefined>();
   const [reading, setReading] = useState<string | null>(null);
   const [quizName, setQuizName] = useState('');
   const [loading, setLoading] = useState(true);
@@ -55,7 +58,7 @@ export default function TakeReadingQuiz() {
       {quizName && <h2 className="text-2xl font-bold mb-4">{quizName}</h2>}
 
       {reading && reading.trim()
-        ? <ReadingDisplay html={reading} />
+        ? <ReadingDisplay html={reading} onSenseWordClick={outletContext?.onMarkedWordClick} />
         : <p className="text-gray-600">No reading for this quiz.</p>}
 
       <div className="mt-6">

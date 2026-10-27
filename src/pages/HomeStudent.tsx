@@ -19,6 +19,9 @@ import { Outlet, useLocation } from "react-router-dom";
 
 export type HomeStudentOutletContext = {
     setFinishedQuizPath: (path: string) => void;
+    // Lets quiz pages (e.g. a reading passage) handle clicks on sense-tagged words the same way
+    // as the teacher's pushed text: play the audio and add the sense's card to review.
+    onMarkedWordClick: (word: Pick<MarkedWord, "text" | "sense_id">) => void;
 };
 import AssignmentModal from "../components/AssignmentModal";
 import CardReview from "../components/CardReview";
@@ -183,7 +186,7 @@ function HomeStudent() {
     // Student clicked a marked word: play its Azure TTS audio, and — if it's tied to a dictionary
     // sense — add that card to the review queue. First click: show the review flashcard. Repeat
     // clicks (already in review): just show the definition once the audio finishes.
-    const handleMarkedWordClick = (word: MarkedWord) => {
+    const handleMarkedWordClick = (word: Pick<MarkedWord, "text" | "sense_id">) => {
         const audioUrl = `https://kphamazureblobstore.blob.core.windows.net/tts-audio/${word.text}.mp3`;
         const audio = new Audio(audioUrl);
         audio.playbackRate = 0.85; // 1 = normal, < 1 = slower
@@ -455,7 +458,7 @@ function HomeStudent() {
                             </button>
                         </div>
                     )}
-                    <Outlet context={{ setFinishedQuizPath } satisfies HomeStudentOutletContext} />
+                    <Outlet context={{ setFinishedQuizPath, onMarkedWordClick: handleMarkedWordClick } satisfies HomeStudentOutletContext} />
                     </>
                 }
 
@@ -540,7 +543,7 @@ return (
                     {liveQuizId &&
                         <TakeQuizLive parent_callback={live_question_attempt_finished} quiz_id={liveQuizId} question_number={liveQuestionNumber} />
                     }
-                    <Outlet context={{ setFinishedQuizPath } satisfies HomeStudentOutletContext} />
+                    <Outlet context={{ setFinishedQuizPath, onMarkedWordClick: handleMarkedWordClick } satisfies HomeStudentOutletContext} />
                 </div>
                 <div className="flex flex-col">
                     <div className="bg-blue-200">

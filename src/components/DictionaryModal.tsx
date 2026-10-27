@@ -50,8 +50,13 @@ export default function DictionaryModal({
 
   // Create the global card for this sense (idempotent on the backend).
   const createCard = (headWord: string, sense: DictSense, partOfSpeech: string) => {
-    api.post("/api/cards/", { text: headWord, definition: sense.definition, part_of_speech: partOfSpeech, sense_id: sense.id })
-      .then(() => setCreatedSenseIds((prev) => new Set(prev).add(sense.id)))
+    const body = { text: headWord, definition: sense.definition, part_of_speech: partOfSpeech, sense_id: sense.id };
+    console.log("[SendText] 3a. + Create Card -> POST /api/cards/ request:", body);
+    api.post("/api/cards/", body)
+      .then((res) => {
+        console.log("[SendText] 3a. /api/cards/ response:", res.data);
+        setCreatedSenseIds((prev) => new Set(prev).add(sense.id));
+      })
       .catch((err) => {
         console.error("Error creating card:", err);
         alert("Could not create a card for this sense.");
@@ -62,9 +67,15 @@ export default function DictionaryModal({
     setLoading(true);
     setError(null);
     setEntries(null);
+    // DEBUG [SendText]: dictionary lookup for a marked word (remove when done)
+    console.log("[SendText] 2a. POST /english/read-dictionary/ request:", { word, source: VIET_SOURCE });
     api.post("/english/read-dictionary/", { word, source: VIET_SOURCE })
-      .then((res) => setEntries(res.data as DictEntry[]))
+      .then((res) => {
+        console.log("[SendText] 2a. read-dictionary response (entries -> part_of_speeches -> senses; sense.id is the sense_id):", res.data);
+        setEntries(res.data as DictEntry[]);
+      })
       .catch((err) => {
+        console.error("[SendText] 2a. read-dictionary failed:", err.response?.status, err.response?.data);
         if (err.response?.status === 404) setError(`No dictionary entry found for "${word}".`);
         else setError(err.response?.data?.error ?? "Dictionary lookup failed.");
       })

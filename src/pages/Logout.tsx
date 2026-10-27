@@ -3,6 +3,7 @@ import { useDispatch } from "react-redux";
 import { type AppDispatch } from "../redux/store";
 import { logout } from "../redux/userSlice";
 import { Navigate } from "react-router-dom";
+import api from "../api";
 //import { clear } from '../redux/connectedUsersSlice';
 //import { reset } from "../redux/liveQuizIdSlice";
 
@@ -12,15 +13,17 @@ function Logout() {
 
     useEffect(() => {
         if (!hasLoggedOut.current) {
-            
-            dispatch(logout());
-            localStorage.removeItem("access");
-            localStorage.removeItem("refresh");
-            hasLoggedOut.current = true; // Ensure logout is only dispatched once
-            // clear access and refresh tokens from localStorage
-            //dispatch(clear()); // clear list of connected users in redux store
-            //dispatch(reset()); // reset liveQuizId in redux store
-   
+            hasLoggedOut.current = true; // Ensure logout runs only once
+            // Tell the backend first (while the access token is still present, so the
+            // auth header is attached) to log the logout, then clear tokens locally
+            // regardless of whether that call succeeds.
+            api.post("/api/logout/")
+                .catch(() => { /* log out locally even if the server call fails */ })
+                .finally(() => {
+                    dispatch(logout());
+                    localStorage.removeItem("access");
+                    localStorage.removeItem("refresh");
+                });
         }
     }, [dispatch]);
 

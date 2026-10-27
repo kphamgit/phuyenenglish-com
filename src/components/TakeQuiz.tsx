@@ -340,7 +340,7 @@ const handleReviewNo = () => {
                 Close
               </button>
             </div>
-            <ReadingDisplay html={readingHtml} />
+            <ReadingDisplay html={readingHtml} onSenseWordClick={outletContext?.onMarkedWordClick} />
           </div>
         </div>
       )}

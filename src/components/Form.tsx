@@ -21,6 +21,7 @@ function Form({ route, method }: FormProps) {
 
     const [username, setUsername] = useState(user_name_env);
     const [password, setPassword] = useState(password_env);
+    const [showPassword, setShowPassword] = useState(false);
     const [loading, setLoading] = useState(false);
     const navigate = useNavigate();
 
@@ -79,11 +80,19 @@ function Form({ route, method }: FormProps) {
                 />
                 <input
                     className="form-input"
-                    type="password"
+                    type={showPassword ? "text" : "password"}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="Password"
                 />
+                <label className="w-[90%] flex items-center gap-2 text-sm text-gray-700 cursor-pointer select-none">
+                    <input
+                        type="checkbox"
+                        checked={showPassword}
+                        onChange={(e) => setShowPassword(e.target.checked)}
+                    />
+                    Show password
+                </label>
                 {loading && <LoadingIndicator />}
                 <button className="form-button" type="submit">
                     {name}

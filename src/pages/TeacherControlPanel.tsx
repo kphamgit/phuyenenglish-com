@@ -26,6 +26,10 @@ interface Props {
     ref: React.Ref<TeacherControlRefProps>;
 }
 
+// DEBUG: show each word button's spaCy root form (lemma) under the word, when it differs.
+// Set to false to hide.
+const SHOW_LEMMAS = true;
+
 export const TeacherControlPanel = ({ref, live_quiz_id }: Props) => {
 //function TeacherControlPanel() {
      
@@ -385,9 +389,12 @@ export const TeacherControlPanel = ({ref, live_quiz_id }: Props) => {
 
         // Every marked word must have a sense chosen AND a card created for that sense. Verify
         // against the backend and stop (with a reminder) if any word isn't ready.
+        console.log("[SendText] 4. Send clicked. Marked words (with chosen sense_id):");
+        console.table(marked);
         const senseIds = marked
             .map((m) => m.sense_id)
             .filter((id): id is number => id != null);
+        console.log("[SendText] 4. POST /api/cards/check-senses/ request:", { sense_ids: senseIds });
         let existingSenses = new Set<number>();
         try {
             const res = await api.post<{ existing_sense_ids: number[] }>(
@@ -395,6 +402,7 @@ export const TeacherControlPanel = ({ref, live_quiz_id }: Props) => {
                 { sense_ids: senseIds }
             );
             existingSenses = new Set(res.data.existing_sense_ids);
+            console.log("[SendText] 4. check-senses response:", res.data);
         } catch (err) {
             console.error("Error checking cards for senses:", err);
             alert("Could not verify cards for the marked words. Please try again.");
@@ -402,6 +410,7 @@ export const TeacherControlPanel = ({ref, live_quiz_id }: Props) => {
         }
         const notReady = marked.filter((m) => m.sense_id == null || !existingSenses.has(m.sense_id));
         if (notReady.length > 0) {
+            console.warn("[SendText] 4. NOT sent — these marked words have no sense/card yet:", notReady);
             alert(
                 "No card has been created yet for these marked words:\n\n" +
                 notReady.map((m) => `• ${m.text}`).join("\n") +
@@ -425,6 +434,8 @@ export const TeacherControlPanel = ({ref, live_quiz_id }: Props) => {
                 );
                 const existing = new Set(res.data.existing);
                 wordsToCreate = uniqueWords.filter((w) => !existing.has(w));
+                console.log("[SendText] 5. POST /api/audio/check-words/", { words: uniqueWords }, "-> response:", res.data,
+                    "-> will create audio for:", wordsToCreate);
             } catch (err) {
                 console.error("Error checking existing audio:", err);
                 // Fall back to trying all — the create endpoint is still idempotent.
@@ -471,6 +482,7 @@ export const TeacherControlPanel = ({ref, live_quiz_id }: Props) => {
             user_name: name,        // identify sender, which is teacher
             marked_words: marked,   // words the teacher marked as "to learn", resolved in context
         };
+        console.log("[SendText] 6. WebSocket send (live_text payload the students receive):", payload);
         websocketRef.current.send(JSON.stringify(payload));
         toast.success("Text sent!", {
             position: "top-right",
@@ -493,11 +505,16 @@ export const TeacherControlPanel = ({ref, live_quiz_id }: Props) => {
         setSelectedIndices(new Set()); // fresh token list -> clear any previous selection
         setSenseByIndex({});           // and any sense associations
         setTokenizing(true);
+        // DEBUG [SendText]: data flow for the Send-Text panel (remove when done)
+        console.log("[SendText] 1. Convert to Buttons -> POST /english/tokenize-text/ request:", { text });
         api.post<{ tokens: MarkedWord[] }>("/english/tokenize-text/", { text })
             .then((res) => {
+                console.log("[SendText] 1. tokenize-text response (one token per word button):", res.data);
+                console.table(res.data.tokens ?? []);
                 setTextButtons(res.data.tokens ?? []);
             })
             .catch((err) => {
+                console.error("[SendText] 1. tokenize-text failed:", err.response?.status, err.response?.data);
                 console.error("Error tokenizing text:", err);
                 alert("Could not convert the text to buttons.");
             })
@@ -508,6 +525,12 @@ export const TeacherControlPanel = ({ref, live_quiz_id }: Props) => {
     // lemma in the Viet dictionary and show the results in a modal.
     const handleWordButtonClick = (token: MarkedWord) => {
         const willSelect = !selectedIndices.has(token.index);
+        console.log(
+            `[SendText] 2. Word button clicked: "${token.text}" (index ${token.index}) ->`,
+            willSelect ? "MARKED; opening DictionaryModal for lemma" : "UNMARKED (no request)",
+            willSelect ? `"${token.lemma}"` : "",
+            { token }
+        );
         setSelectedIndices((prev) => {
             const next = new Set(prev);
             if (next.has(token.index)) next.delete(token.index);
@@ -656,8 +679,9 @@ export const TeacherControlPanel = ({ref, live_quiz_id }: Props) => {
                         } ${!inputText.trim() ? "opacity-50 cursor-not-allowed" : ""}`}
                         onClick={handleConvertToButtons}
                         disabled={!inputText.trim()}
+                        title="Splits the text into words and finds each word's root form (lemma) with spaCy, via /english/tokenize-text/"
                     >
-                        Convert to Buttons
+                        Convert to Buttons (and Lemmatize)
                     </button>
                 </div>
 
@@ -679,17 +703,24 @@ export const TeacherControlPanel = ({ref, live_quiz_id }: Props) => {
                                 <div className="flex flex-wrap gap-2">
                                     {textButtons.map((token) => {
                                         const selected = selectedIndices.has(token.index);
+                                        const showLemma = SHOW_LEMMAS && token.lemma.toLowerCase() !== token.text.toLowerCase();
                                         return (
                                         <button
                                             key={token.index}
                                             onClick={() => handleWordButtonClick(token)}
-                                            className={`px-2 py-1 rounded text-base ${
+                                            title={SHOW_LEMMAS ? `lemma: ${token.lemma} · pos: ${token.pos}` : undefined}
+                                            className={`px-2 py-1 rounded text-base flex flex-col items-center leading-tight ${
                                                 selected
                                                     ? "bg-blue-500 hover:bg-blue-600 text-white"
                                                     : "bg-gray-100 hover:bg-blue-200 text-black"
                                             }`}
                                         >
-                                            {token.text}
+                                            <span>{token.text}</span>
+                                            {showLemma && (
+                                                <span className={`text-xs italic ${selected ? "text-blue-100" : "text-gray-500"}`}>
+                                                    {token.lemma}
+                                                </span>
+                                            )}
                                         </button>
                                         );
                                     })}
@@ -797,14 +828,17 @@ export const TeacherControlPanel = ({ref, live_quiz_id }: Props) => {
                 <DictionaryModal
                     word={dictToken.lemma}
                     selectedSenseId={senseByIndex[dictToken.index] ?? null}
-                    onSelectSense={(senseId) =>
+                    onSelectSense={(senseId) => {
+                        console.log(
+                            `[SendText] 3. Sense ${senseId === null ? "cleared" : `chosen: sense_id ${senseId}`} for "${dictToken.text}" (index ${dictToken.index})`
+                        );
                         setSenseByIndex((prev) => {
                             const next = { ...prev };
                             if (senseId === null) delete next[dictToken.index];
                             else next[dictToken.index] = senseId;
                             return next;
-                        })
-                    }
+                        });
+                    }}
                     onClose={() => setDictToken(null)}
                 />
             )}
