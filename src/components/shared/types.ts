@@ -61,6 +61,7 @@ interface BaseWebSocketMessageProps {
   "live_quiz_terminated" |
   "welcome_message" |
   "another_user_joined" |
+  "chat_history" |
   "REDIS_DATA" |
   "terminate_live_quiz";
   content: any;
@@ -115,6 +116,8 @@ export interface WebSocketMessageProps extends BaseWebSocketMessageProps {
   marked_words?: MarkedWord[]; // for live_text: words the teacher marked as "to learn" (in context)
   voice?: string; // for SR prompts: the Neural2 voice the teacher chose for TTS playback
   no_audio?: boolean; // for SR prompts: "SR No Audio" — don't play the prompt to the student (mic still on)
+  id?: string; // for chat: server-assigned message id (to de-duplicate against the chat history)
+  timestamp?: string; // for chat: when the ws-server received the message (ISO string)
 }
 
 export interface QuestionProps {

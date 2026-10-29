@@ -6,6 +6,7 @@ import { useSelector } from 'react-redux';
 import { FaAngleDoubleRight } from 'react-icons/fa';
 import { NEURAL2_VOICES } from './tts';
 import SsmlConvertModal from './SsmlConvertModal';
+import type { WebSocketMessageProps } from '../shared/types';
 //import type { WebSocketMessageProps } from '../shared/types';
 //import type { RootState } from '../../redux/store';
 //import type { WebSocketMessageProps } from '../shared/types';
@@ -25,6 +26,7 @@ export interface ChatPageProps {
   }
 
 export interface ChatProps {
+    id?: string; // server-assigned (ws-server) — used to skip a live message already in the history
     text?: string;
     user_name: string;
     audio_url?: string; // presigned S3 url of a recorded voice answer (for the teacher to replay)
@@ -57,7 +59,7 @@ const VIETNAMESE_REGEX = /[À-ÃÈ-ÊÌÍÒ-ÕÙÚÝà-ãè-êìíò-õùúýĂ�
     // Teacher-only: SSML Convert modal (sentence -> clickable word buttons).
     const [showSsmlModal, setShowSsmlModal] = useState(false);
 
-    const {websocketRef} = useWebSocket();
+    const {websocketRef, eventEmitter} = useWebSocket();
     
     //const { name, isLoggedIn } = useSelector((state: { user: { name: string; isLoggedIn: boolean } }) => state.user);
     const { name } = useSelector((state: { user: { name: string; isLoggedIn: boolean } }) => state.user);
@@ -68,11 +70,28 @@ const VIETNAMESE_REGEX = /[À-ÃÈ-ÊÌÍÒ-ÕÙÚÝà-ãè-êìíò-õùúýĂ�
       toggle_chat: () => setIsChatOpen(!isChatOpen)
     }));
   
+    // The chat box is unmounted when closed, so on every open ask the ws-server for the stored
+    // conversation (it filters to what this user may see) and show that.
     useEffect(() => {
-      // check for duplicate message id before adding to incomingMessages
+      const handleMessage = (data: WebSocketMessageProps) => {
+        if (data.message_type !== "chat_history") return;
+        const history: ChatProps[] = (data.content as WebSocketMessageProps[])
+          // SR prompts from others are shown by HomeStudent, not the chat box (same as live chat)
+          .filter((m) => m.user_name === name || !(m.content ?? '').toString().trim().startsWith("SR"))
+          .map((m) => ({ id: m.id, text: m.content, user_name: m.user_name, audio_url: m.audio_url, voice: m.voice, no_audio: m.no_audio }));
+        setIncomingMessages(history);
+      };
+      eventEmitter?.on("message", handleMessage);
+      if (websocketRef.current?.readyState === WebSocket.OPEN) {
+        websocketRef.current.send(JSON.stringify({ message_type: "GET_CHAT_HISTORY", user_name: name }));
+      }
+      return () => {
+        eventEmitter?.off("message", handleMessage);
+      };
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [eventEmitter]);
 
-
-
+    useEffect(() => {
       if (chat.text) {
         const chatMessage: ChatProps = { text: chat.text, user_name: chat.user_name };
         // ignore messages from myself. 
@@ -85,6 +104,8 @@ const VIETNAMESE_REGEX = /[À-ÃÈ-ÊÌÍÒ-ÕÙÚÝà-ãè-êìíò-õùúýĂ�
         }
 
         setIncomingMessages((prevMessages) => {
+          // already there (e.g. it came in with the history)
+          if (chat.id && prevMessages.some((m) => m.id === chat.id)) return prevMessages;
           return [...prevMessages, chat]
           });
 
