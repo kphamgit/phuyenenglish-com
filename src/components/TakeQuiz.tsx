@@ -241,7 +241,7 @@ const handleReviewNo = () => {
  const displayQuestion = () => {
   if (!question) return null;
   return (
-    <div className='my-5'>
+    <div className='my-5 w-full'>
       {/* key forces a fresh input for each new question attempt */}
       <QuestionInput key={questionAttemptId ?? 0} question={question} ref={childRef} submitted={answerSubmitted} />
     </div>
@@ -304,7 +304,7 @@ const handleReviewNo = () => {
 
   return (
     <>
-    <div className="relative flex flex-col items-center bg-amber-100 gap-6 p-4 max-w-4xl mx-auto">
+    <div className="relative flex flex-col items-center bg-amber-300 gap-6 p-4 max-w-4xl mx-auto">
       <div className="absolute top-2 right-2 z-10 flex gap-2">
         {readingHtml && (
           <button

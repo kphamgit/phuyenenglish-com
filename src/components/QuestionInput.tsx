@@ -1,8 +1,7 @@
 import type { ChildRef } from './TakeQuiz';
 import type { QuestionProps } from './shared/types';
 import { DynamicWordInputs } from './questions/DynamicWordInputs';
-// import { ButtonSelectCloze } from './questions/ButtonSelectCloze';  // previous version (fly-in animation)
-import { ButtonSelectClozeNew } from './questions/ButtonSelectClozeNew';
+import { ButtonSelectCloze } from './questions/ButtonSelectCloze';
 import { ButtonSelect } from './questions/ButtonSelect';
 import { RadioQuestion } from './questions/RadioQuestion';
 import { CheckboxQuestion } from './questions/CheckboxQuestion';
@@ -11,11 +10,12 @@ import SRNonContinuous from './questions/SRNonContinuous';
 import { WordsSelect } from './questions/WordsSelect';
 import { DropDowns } from './questions/DropDowns';
 import SentenceScramble from './questions/SentenceScramble';
+import WritingQuestion from './questions/WritingQuestion';
 
 interface QuestionInputProps {
   question: QuestionProps;
   ref: React.Ref<ChildRef>;    // forwarded to the active question component (exposes getAnswer)
-  submitted?: boolean;         // only used by ButtonSelectClozeNew (format 2)
+  submitted?: boolean;         // only used by ButtonSelectCloze (format 2)
 }
 
 /**
@@ -33,7 +33,7 @@ export default function QuestionInput({ question, ref, submitted }: QuestionInpu
       return <DynamicWordInputs content={content} ref={ref} />;
     case 2:
       return (
-        <ButtonSelectClozeNew
+        <ButtonSelectCloze
           content={content}
           content_language={content_language}
           choices={question.button_cloze_options}
@@ -57,6 +57,8 @@ export default function QuestionInput({ question, ref, submitted }: QuestionInpu
       return <DropDowns content={content} ref={ref} />;
     case 12:
       return <SentenceScramble content={content} ref={ref} />;
+    case 13:
+      return <WritingQuestion content={content} ref={ref} />;
     default:
       return null;
   }

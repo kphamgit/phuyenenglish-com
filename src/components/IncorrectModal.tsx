@@ -12,6 +12,7 @@ import WordsSelect from "./explanations/WordsSelect";
 import DropDown from "./explanations/DropDown";
 import SentenceScramble from "./explanations/SentenceScramble";
 import SRExplanation from "./explanations/SRExplanation";
+import WritingExplanation from "./explanations/WritingExplanation";
 
 
 export interface Props {
@@ -75,6 +76,7 @@ function IncorrectModal({ parentCallback, format, answer_key, content, explanati
             {format === 8 && <WordsSelect content={content} answer_key={answer_key} processQuestionResults={processQuestionResults} />}
             {format === 10 && <DropDown content={content} processQuestionResults={processQuestionResults} />}
             {format === 12 && <SentenceScramble content={content} processQuestionResults={processQuestionResults} />}
+            {format === 13 && <WritingExplanation answer_key={answer_key} />}
             { explanation &&
             <div className="bg-cyan-200 mt-3 p-2">{explanation}</div>
           }

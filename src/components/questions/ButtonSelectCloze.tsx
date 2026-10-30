@@ -1,12 +1,5 @@
-import React, { useEffect, useImperativeHandle, useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import React, { useImperativeHandle, useMemo, useState } from 'react';
 import type { ChildRef } from '../TakeQuiz';
-
-type WordBankItem = {
-  id: string;
-  text: string;
-  placed: boolean;
-};
 
 type SentenceToken =
   | { type: 'text'; content: string }
@@ -20,165 +13,144 @@ interface Props {
   ref: React.Ref<ChildRef>;
 }
 
+// Split "I [am] a [student]." into text and blank tokens.
+const parseSentence = (content: string | undefined): SentenceToken[] => {
+  if (!content) return [];
+  const tokens: SentenceToken[] = [];
+  const regex = /\[([^\]]+)\]/g;
+  let lastIndex = 0;
+  let blankIndex = 0;
+  let match;
+  while ((match = regex.exec(content)) !== null) {
+    if (match.index > lastIndex) tokens.push({ type: 'text', content: content.slice(lastIndex, match.index) });
+    tokens.push({ type: 'blank', blankIndex: blankIndex++ });
+    lastIndex = regex.lastIndex;
+  }
+  if (lastIndex < content.length) tokens.push({ type: 'text', content: content.slice(lastIndex) });
+  return tokens;
+};
+
+const playWordAudio = (text: string, content_language: string) => {
+  const prefix = content_language === 'fr' ? 'fr_' : '';
+  const audio = new Audio(`https://kphamazureblobstore.blob.core.windows.net/tts-audio/${prefix}${text}.mp3`);
+  audio.playbackRate = 0.85; // 1 = normal, < 1 = slower, > 1 = faster
+  audio.play().catch(() => {});
+};
+
+// Button-select cloze (format 2): each blank is a plain underline
+// (at least 70px wide). Clicking a word button drops its text into the first empty blank (or, when
+// all are filled, swaps out the most recently placed word), and since the sentence is ordinary
+// inline text, the rest of it re-flows around the inserted word. Click a placed word to send it
+// back to the word bank.
 export const ButtonSelectCloze = ({ content, content_language, choices, submitted = false, ref }: Props) => {
-  const [initialSentence, setInitialSentence] = useState<SentenceToken[]>([]);
-  const [wordBank, setWordBank] = useState<WordBankItem[]>([]);
-  const [longestWord, setLongestWord] = useState<string>("");
-  const [answer, setAnswer] = useState<string[] | undefined>(undefined);
-  const [placedWords, setPlacedWords] = useState<Record<number, WordBankItem | null>>({});
+  const sentence = useMemo(() => parseSentence(content), [content]);
+  const blankCount = sentence.filter((t) => t.type === 'blank').length;
+  const wordBank = useMemo(() => (choices ? choices.split('/').map((c) => c.trim()) : []), [choices]);
+
+  // blank index -> index of the word-bank choice placed in it
+  const [placed, setPlaced] = useState<Record<number, number>>({});
+  // the blank filled most recently — replaced by the next chip once every blank is filled
+  const [lastFilled, setLastFilled] = useState<number | null>(null);
   const [localSubmitted, setLocalSubmitted] = useState(false);
 
-  useEffect(() => {
-    if (submitted) setLocalSubmitted(true);
-  }, [submitted]);
+  // New question: clear the placed words and the submitted lock (adjusting state during render,
+  // instead of in an effect).
+  const questionKey = `${content}|${choices}`;
+  const [prevQuestionKey, setPrevQuestionKey] = useState(questionKey);
+  if (prevQuestionKey !== questionKey) {
+    setPrevQuestionKey(questionKey);
+    setPlaced({});
+    setLastFilled(null);
+    setLocalSubmitted(false);
+  }
+  // Once submitted, stay locked until the next question.
+  if (submitted && !localSubmitted) setLocalSubmitted(true);
 
-  const handleWordSelect = (selectedItem: WordBankItem) => {
-    if (selectedItem.placed) return;
-    const targetBlankIndex = Object.keys(placedWords).map(Number).find(index => placedWords[index] === null);
-    if (targetBlankIndex === undefined) return;
+  const usedChoices = new Set(Object.values(placed));
 
-    let audioUrl = `https://kphamazureblobstore.blob.core.windows.net/tts-audio/${selectedItem.text}.mp3`;
-    if (content_language === "fr") {
-      audioUrl = `https://kphamazureblobstore.blob.core.windows.net/tts-audio/fr_${selectedItem.text}.mp3`;
+  // A chip fills the first empty blank. Once every blank is filled, it replaces the most recently
+  // filled one instead; the replaced word goes back to the bank (usedChoices is derived from `placed`).
+  const handleWordSelect = (choiceIndex: number) => {
+    if (localSubmitted || usedChoices.has(choiceIndex) || blankCount === 0) return;
+    let target = -1;
+    for (let i = 0; i < blankCount; i++) {
+      if (placed[i] === undefined) { target = i; break; }
     }
-    const audio = new Audio(audioUrl);
-    audio.playbackRate = 0.85; // 1 = normal, < 1 = slower, > 1 = faster
-    audio.play().catch(() => {});
-
-    setPlacedWords(prev => ({ ...prev, [targetBlankIndex]: selectedItem }));
-    setWordBank(prev => prev.map(item => item.id === selectedItem.id ? { ...item, placed: true } : item));
-    setAnswer(prev => {
-      const newAnswer = [...(prev || [])];
-      newAnswer[targetBlankIndex] = selectedItem.text;
-      return newAnswer;
-    });
+    if (target === -1) target = lastFilled ?? blankCount - 1;
+    playWordAudio(wordBank[choiceIndex], content_language);
+    setPlaced((prev) => ({ ...prev, [target]: choiceIndex }));
+    setLastFilled(target);
   };
 
-  const handleReturnWord = (blankIndex: number, placedWord: WordBankItem) => {
-    setPlacedWords(prev => ({ ...prev, [blankIndex]: null }));
-    setWordBank(prev => prev.map(item => item.id === placedWord.id ? { ...item, placed: false } : item));
-    setAnswer(prev => {
-      if (!prev) return prev;
-      const newAnswer = [...prev];
-      newAnswer[blankIndex] = '';
-      return newAnswer;
+  const handleReturnWord = (blankIndex: number) => {
+    if (localSubmitted) return;
+    setPlaced((prev) => {
+      const next = { ...prev };
+      delete next[blankIndex];
+      return next;
     });
+    if (lastFilled === blankIndex) setLastFilled(null);
   };
 
-  const getAnswer = () => answer?.join('/');
+  // Answers in blank order, joined by "/", "" for an empty blank;
+  // undefined until a word has been placed.
+  const getAnswer = () => {
+    if (Object.keys(placed).length === 0) return undefined;
+    return Array.from({ length: blankCount }, (_, i) =>
+      placed[i] === undefined ? '' : wordBank[placed[i]]
+    ).join('/');
+  };
 
   useImperativeHandle(ref, () => ({ getAnswer }));
 
-  useEffect(() => {
-    if (!choices) return;
-    setLocalSubmitted(false);
-    setAnswer(undefined);
-    setPlacedWords({});
-
-    const parsedChoices = choices.split('/').map(choice => choice.trim());
-    const wordBankItems: WordBankItem[] = parsedChoices.map((choice, index) => ({
-      id: `${content?.slice(0, 20)}_opt${index + 1}`,
-      text: choice,
-      placed: false,
-    }));
-    setWordBank(wordBankItems);
-    setLongestWord(wordBankItems.reduce((a, b) => a.text.length > b.text.length ? a : b).text);
-
-    const sentenceTokens: SentenceToken[] = [];
-    const regex = /\[([^\]]+)\]/g;
-    let lastIndex = 0;
-    let match;
-    let blankIndex = 0;
-    if (!content) return;
-    while ((match = regex.exec(content)) !== null) {
-      if (match.index > lastIndex) {
-        sentenceTokens.push({ type: 'text', content: content.slice(lastIndex, match.index) });
-      }
-      sentenceTokens.push({ type: 'blank', blankIndex });
-      blankIndex++;
-      lastIndex = regex.lastIndex;
-    }
-    if (lastIndex < content.length) {
-      sentenceTokens.push({ type: 'text', content: content.slice(lastIndex) });
-    }
-    setInitialSentence(sentenceTokens);
-
-    const newPlacedWords: Record<number, WordBankItem | null> = {};
-    for (let i = 0; i < blankIndex; i++) newPlacedWords[i] = null;
-    setPlacedWords(newPlacedWords);
-  }, [choices, content]);
-
   return (
-    <div className="p-8 space-y-10 bg-white rounded-xl shadow-lg border border-gray-500 max-w-4xl mx-auto">
-      <h2 className="text-xl font-bold text-gray-800 text-center">Complete the Sentence</h2>
+    <div className="p-8 space-y-10 bg-white rounded-xl shadow-lg border border-gray-500 w-full max-w-4xl mx-auto">
+      <h2 className="text-xl font-bold text-green-800 text-center">Complete the Sentence</h2>
 
-      {/* Sentence Area */}
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-2 text-lg font-medium text-red-600 leading-relaxed min-h-16">
-        {initialSentence.map((token, index) => {
+      {/* Sentence Area — plain inline text, so it re-flows as blanks are filled */}
+      <p className="text-lg font-medium text-red-600 leading-loose min-h-16">
+        {sentence.map((token, index) => {
           if (token.type === 'text') {
-            return <span key={index}>{token.content}</span>;
+            return <span key={index} className="whitespace-pre-wrap">{token.content}</span>;
           }
-
-          const placedWord = placedWords[token.blankIndex];
-
+          const choiceIndex = placed[token.blankIndex];
+          const word = choiceIndex === undefined ? null : wordBank[choiceIndex];
           return (
-            <div
+            <span
               key={`blank-${token.blankIndex}`}
-              className="relative border-b-2 border-gray-300 min-w-[120px] h-10 flex items-center justify-center bg-gray-100 rounded"
+              onClick={word && !localSubmitted ? () => handleReturnWord(token.blankIndex) : undefined}
+              title={word && !localSubmitted ? 'Click to remove' : undefined}
+              // empty: a 70px line; filled: shrinks to the word's own width so the sentence reads naturally.
+              // leading: 10px shorter than the sentence's line height (leading-loose = 2em), so the underline
+              // sits 5px higher; the text itself stays on the baseline.
+              className={`inline-block leading-[calc(2em-10px)] text-center border-b-2 border-gray-500 font-semibold text-blue-800 ${
+                word ? 'px-0.5' : 'min-w-[70px] px-1'
+              } ${word && !localSubmitted ? 'cursor-pointer hover:bg-blue-50' : ''}`}
             >
-              {/* Ghost to hold width */}
-              <span className="opacity-0 select-none pointer-events-none whitespace-nowrap px-2">
-                {longestWord}
-              </span>
-              <AnimatePresence>
-                {placedWord && (
-                  localSubmitted ? (
-                    <span className="absolute inset-0 px-4 flex items-center justify-center font-semibold text-blue-800">
-                      {placedWord.text}
-                    </span>
-                  ) : (
-                    <motion.div
-                      layoutId={placedWord.id}
-                      className="absolute inset-0 px-4 flex items-center justify-center bg-blue-100 text-blue-800 rounded shadow-inner cursor-pointer"
-                      whileHover={{ scale: 1.03 }}
-                      onClick={() => handleReturnWord(token.blankIndex, placedWord)}
-                    >
-                      {placedWord.text}
-                    </motion.div>
-                  )
-                )}
-              </AnimatePresence>
-            </div>
+              {word ?? ' '}
+            </span>
           );
         })}
-      </div>
+      </p>
 
       {/* Word Bank Area */}
       <div className="pt-8 border-t border-gray-100">
         <div className="flex flex-wrap gap-4 min-h-14 items-center">
-          {wordBank.map((item) =>
-            item.placed ? (
-              // Ghost placeholder — holds space, low opacity, no layoutId
-              <div
-                key={item.id}
-                className="px-6 py-3 text-lg font-semibold bg-green-300 text-gray-800 rounded-md shadow opacity-30 select-none"
+          {wordBank.map((text, choiceIndex) => {
+            const used = usedChoices.has(choiceIndex);
+            return (
+              <button
+                key={`${choiceIndex}-${text}`}
+                onClick={() => handleWordSelect(choiceIndex)}
+                disabled={used || localSubmitted}
+                className={`px-6 py-3 text-lg font-semibold bg-green-300 text-gray-800 rounded-md shadow transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-2 ${
+                  used ? 'opacity-30 cursor-default' : 'hover:bg-gray-200'
+                }`}
               >
-                {item.text}
-              </div>
-            ) : (
-              // Active chip with layoutId for shared layout animation
-              <motion.button
-                key={item.id}
-                layoutId={item.id}
-                onClick={() => handleWordSelect(item)}
-                className="px-6 py-3 text-lg font-semibold bg-green-300 text-gray-800 rounded-md shadow hover:bg-gray-200 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-2"
-                whileHover={{ y: -3, scale: 1.05 }}
-                whileTap={{ scale: 0.97 }}
-              >
-                {item.text}
-              </motion.button>
-            )
-          )}
+                {text}
+              </button>
+            );
+          })}
         </div>
       </div>
     </div>
