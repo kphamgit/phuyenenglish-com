@@ -5,6 +5,7 @@ import api from "../api";
 import { useEffect, useState } from "react";
 import { useSelector } from "react-redux";
 import type { RootState } from "../redux/store";
+import ReadingDisplay from "./ReadingDisplay";
 
 interface UnitProps {
     id: number,
@@ -210,7 +211,7 @@ function Category() {
                         </div>
                         <div className="overflow-auto p-4 whitespace-pre-wrap text-gray-800">
                             {descriptionQuiz.description?.trim()
-                                ? descriptionQuiz.description
+                                ? <ReadingDisplay html={descriptionQuiz.description} />
                                 : <span className="text-gray-500 italic">This quiz has no description.</span>}
                         </div>
                     </div>
