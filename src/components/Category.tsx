@@ -19,6 +19,7 @@ interface QuizProps {
     quiz_number: number,
     video_url?: string,
     reading?: string | null,
+    description?: string | null,
     video_segments? : any[]
 }
 
@@ -60,6 +61,16 @@ function Category() {
     // Teacher-only: questions of the quiz being inspected (null => modal closed).
     const [quizQuestions, setQuizQuestions] = useState<QuestionRow[] | null>(null);
     const [inspectedQuiz, setInspectedQuiz] = useState<QuizProps | null>(null);
+
+    // student_staff users get a "?" button next to each quiz that shows its description.
+    const [isStudentStaff, setIsStudentStaff] = useState(false);
+    const [descriptionQuiz, setDescriptionQuiz] = useState<QuizProps | null>(null);
+
+    useEffect(() => {
+        api.get("/api/me/")
+            .then((res) => setIsStudentStaff(!!res.data.student_staff))
+            .catch(() => setIsStudentStaff(false));
+    }, []);
 
     useEffect(() => {
        if (params.category_id) {
@@ -162,12 +173,49 @@ function Category() {
                                     { isTeacher &&
                                         <span className="ml-2 text-base font-bold text-red-800">(id: {quiz.id})</span>
                                     }
+                                    { isStudentStaff &&
+                                        <button
+                                            className="ml-1 px-1.5 rounded bg-green-200 text-blue-700 hover:bg-green-300"
+                                            title="Show quiz description"
+                                            onClick={() => setDescriptionQuiz(quiz)}
+                                        >
+                                            ?
+                                        </button>
+                                    }
                                 </div>
                             ))
                         }
                     </div>
                 ))
             }
+
+            {/* student_staff: quiz description */}
+            {descriptionQuiz && (
+                <div
+                    className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+                    onClick={() => setDescriptionQuiz(null)}
+                >
+                    <div
+                        className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[85vh] flex flex-col"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div className="flex items-center justify-between p-4 border-b">
+                            <h2 className="text-lg font-bold text-gray-800">{descriptionQuiz.name}</h2>
+                            <button
+                                className="px-3 py-1 rounded-md bg-gray-200 hover:bg-gray-300 text-gray-700"
+                                onClick={() => setDescriptionQuiz(null)}
+                            >
+                                Close
+                            </button>
+                        </div>
+                        <div className="overflow-auto p-4 whitespace-pre-wrap text-gray-800">
+                            {descriptionQuiz.description?.trim()
+                                ? descriptionQuiz.description
+                                : <span className="text-gray-500 italic">This quiz has no description.</span>}
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Teacher-only: questions table for the inspected quiz */}
             {quizQuestions && (
