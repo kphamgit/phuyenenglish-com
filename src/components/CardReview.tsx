@@ -190,6 +190,8 @@ function CardQuestion({ card, limits, onNext }: { card: QueueCard; limits: Limit
         nonce: question.nonce,
         choice,
         latency_ms: latencyMs,
+        // Logged (for a wrong answer) so the teacher can see which meaning was picked.
+        chosen_definition: question.options.find((o) => o.key === choice)?.definition ?? '',
       });
       setResult(res.data);
       new Audio(audioUrl).play().catch(() => {});   // hear the word again with its meaning
