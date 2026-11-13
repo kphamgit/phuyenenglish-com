@@ -491,7 +491,6 @@ function HomeStudent() {
                 <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 overflow-y-auto p-4">
                     <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl my-8">
                         <CardReview
-                            userName={name ?? ''}
                             onComplete={() => setShowVocabReview(false)}
                         />
                     </div>
@@ -501,7 +500,6 @@ function HomeStudent() {
             {reviewCard && (
                 <SingleCardReview
                     card={reviewCard.card}
-                    userName={name ?? ''}
                     autoPlay={reviewCard.autoPlay}
                     audioMissing={reviewCard.audioMissing}
                     surfaceWord={reviewCard.surfaceWord}
