@@ -82,10 +82,6 @@ function HomeStudent() {
         setFinishedQuizPath(null);
     }
     const inQuiz = /\/take_(video_|reading_)?quiz\//.test(location.pathname) && finishedQuizPath !== location.pathname;
-    // Keep the latest live_quiz_id readable inside async callbacks (the welcome_message may set it
-    // shortly after mount, e.g. when reconnecting into a live quiz already in progress).
-    const liveQuizIdRef = useRef(liveQuizId);
-    liveQuizIdRef.current = liveQuizId;
 
     const {eventEmitter, websocketRef} = useWebSocket();
 
@@ -272,25 +268,8 @@ function HomeStudent() {
         getLevels();
     }, []);  // empty dependency array to run only once on mount
 
-    // On login: pop up the vocabulary review if cards are due — but NOT if the student is resuming
-    // a live quiz. Wait briefly so a reconnect's welcome_message can set live_quiz_id before we
-    // decide, and re-check after the fetch in case it arrives meanwhile.
-    useEffect(() => {
-        const timer = setTimeout(() => {
-            if (liveQuizIdRef.current) return; // resuming a live quiz -> skip auto review
-            api.get('/api/cards/due/')
-                .then((res) => {
-                    if (liveQuizIdRef.current) return; // a live quiz arrived while fetching
-                    const due = res.data.due_cards ?? [];
-                    if (due.length > 0) setShowVocabReview(true);
-                })
-                .catch((err) => console.error('Error checking due cards:', err));
-        }, 1200);
-        return () => clearTimeout(timer);
-    }, []);  // run once on mount
-
-    // Backstop: if a live quiz becomes active at any point, cancel the auto vocabulary review
-    // (covers a slow welcome_message that arrives after the review already popped up).
+    // The vocabulary review opens only from the "Vocabulary Review" button (no longer on login).
+    // If a live quiz becomes active while it's open, close it.
     useEffect(() => {
         if (liveQuizId) setShowVocabReview(false);
     }, [liveQuizId]);
@@ -374,7 +353,18 @@ function HomeStudent() {
                                 onShowAssignments={() => setShowAssignmentModal(true)}
                                 disabled={inQuiz}
                             />
-                            <DictionaryLookup />
+                            <div className="flex items-center gap-2">
+                                <button
+                                    onClick={() => setShowVocabReview(true)}
+                                    disabled={inQuiz}
+                                    className={`text-white bg-green-600 text-sm px-3 py-1 rounded-md hover:bg-green-800 whitespace-nowrap ${
+                                        inQuiz ? "opacity-50 cursor-not-allowed" : ""
+                                    }`}
+                                >
+                                    Vocabulary Review
+                                </button>
+                                <DictionaryLookup />
+                            </div>
                         </div>
                     </div>
                     {showAssignmentModal && pendingAssignments.length > 0 && (
@@ -486,7 +476,7 @@ function HomeStudent() {
                 </div>
             )}
 
-            {/* Vocabulary review pops up on login when cards are due (not during a live quiz). */}
+            {/* Vocabulary review, opened from the "Vocabulary Review" button (not during a live quiz). */}
             {showVocabReview && !liveQuizId && (
                 <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 overflow-y-auto p-4">
                     <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl my-8">
