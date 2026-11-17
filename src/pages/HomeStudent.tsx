@@ -32,6 +32,7 @@ import DefinitionPopup from "../components/DefinitionPopup";
 import DictionaryLookup from "../components/DictionaryLookup";
 // import TranslationBox from "../components/TranslationBox";  // hidden for now (see the bottom bar)
 import VoiceAnswerRecorder from "../components/chat/VoiceAnswerRecorder";
+import StudentShadowing from "../components/shadowing/StudentShadowing";
 import { ttsTextOf, playPromptTts, stripSsml, shouldSkipTts } from "../components/chat/tts";
 import { renderVietPron } from "../components/vietPron";
 
@@ -448,6 +449,8 @@ function HomeStudent() {
                             </button>
                         </div>
                     )}
+                    {/* Shadowing exercise from the teacher (hidden, but kept, while taking a quiz). */}
+                    <StudentShadowing hidden={inQuiz} />
                     <Outlet context={{ setFinishedQuizPath, onMarkedWordClick: handleMarkedWordClick } satisfies HomeStudentOutletContext} />
                     </>
                 }

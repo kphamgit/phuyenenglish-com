@@ -62,6 +62,8 @@ interface BaseWebSocketMessageProps {
   "welcome_message" |
   "another_user_joined" |
   "chat_history" |
+  "shadowing_prompt" |
+  "shadowing_result" |
   "REDIS_DATA" |
   "terminate_live_quiz";
   content: any;

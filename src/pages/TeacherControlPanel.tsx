@@ -11,6 +11,7 @@ import 'react-toastify/dist/ReactToastify.css';
 import { useUserConnections } from "../components/context/UserConnectionsContext";
 import ListUsers from "./ListUsers";
 import DictionaryModal from "../components/DictionaryModal";
+import Shadowing from "../components/Shadowing";
 
 import { type QuizProps, type MarkedWord, type LiveTextMessage } from "../components/shared/types";
 
@@ -822,7 +823,8 @@ export const TeacherControlPanel = ({ref, live_quiz_id }: Props) => {
                 )}
             </div>
 
-
+            {/* Generate a reference recording of a sentence (Google TTS) for shadowing practice. */}
+            <Shadowing />
 
             {dictToken && (
                 <DictionaryModal
