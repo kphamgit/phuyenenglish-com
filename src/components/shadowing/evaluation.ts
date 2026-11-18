@@ -54,6 +54,9 @@ export interface EvaluationResult {
   summary: {
     spoken_text: string;
     targeted_words: string[];
+    strict_connected_speech?: boolean;
+    fall_match_ratio?: number;
+    rise_match_ratio?: number;
     overall_score_pct: number;
     pronunciation_score_pct: number;
     stress_match_pct: number;
@@ -65,6 +68,10 @@ export interface EvaluationResult {
     benchmark_stress_pattern: string; // e.g. "MY[0] MOTHER[3-0] IS[0]"
     recorded_stress_pattern: string;
     recorded_timit_ipa: string;
+  };
+  stage2_alignment?: {
+    word_match_vs_target_pct?: number;
+    acoustic_confidence_pct?: number;
   };
   stage3_stress?: { stress_evaluation?: { word_comparisons?: StressComparison[] } };
   stage4_pronunciation?: { word_pronunciations?: EvaluationWord[] };

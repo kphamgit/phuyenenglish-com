@@ -3,8 +3,15 @@
 // Copied from p2p-voice-chat-admin (src/wav.ts).
 
 const SAMPLE_RATE = 16000;
+// Peak normalization (for microphone takes): the loudest sample is raised to about -1 dBFS.
+const TARGET_PEAK = 0.9;
+// At most 20× (+26 dB), so a take that is (almost) silence doesn't become loud noise.
+const MAX_GAIN = 20;
 
-export async function toWav16kMono(audio: Blob): Promise<Blob> {
+// `normalize`: raise the whole take by one fixed gain so its peak is near full volume. Recordings
+// are made with the browser's auto gain control off (it would flatten the loudness differences
+// word stress is judged by), so they can be quiet; one fixed gain keeps those differences intact.
+export async function toWav16kMono(audio: Blob, { normalize = false }: { normalize?: boolean } = {}): Promise<Blob> {
   const decoder = new AudioContext();
   let decoded: AudioBuffer;
   try {
@@ -19,7 +26,20 @@ export async function toWav16kMono(audio: Blob): Promise<Blob> {
   source.connect(offline.destination);
   source.start();
   const rendered = await offline.startRendering();
-  return encodeWav(rendered.getChannelData(0), SAMPLE_RATE);
+  const samples = rendered.getChannelData(0);
+  if (normalize) normalizePeak(samples);
+  return encodeWav(samples, SAMPLE_RATE);
+}
+
+// Scales the samples in place so the loudest one reaches TARGET_PEAK (never more than MAX_GAIN,
+// and never makes it quieter).
+function normalizePeak(samples: Float32Array): void {
+  let peak = 0;
+  for (let i = 0; i < samples.length; i++) peak = Math.max(peak, Math.abs(samples[i]!));
+  if (peak === 0) return;
+  const gain = Math.min(MAX_GAIN, TARGET_PEAK / peak);
+  if (gain <= 1) return;
+  for (let i = 0; i < samples.length; i++) samples[i]! *= gain;
 }
 
 // A PCM WAV file (16-bit, one channel) of these samples (-1 to 1).

@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { toWav16kMono } from "../shared/wav";
 
 // Records the microphone and turns each take into a 16 kHz mono WAV (what VoiceAnalyzer_Claude
-// expects). Shared by the student's Shadowing panel and the teacher's "test it yourself".
+// expects), raised to a normal loudness (see toWav16kMono's `normalize`).
+// Shared by the student's Shadowing panel and the teacher's "test it yourself".
 // Adapted from p2p-voice-chat-admin (ReferenceRecorder.tsx).
 export function useRecorder() {
     const [recording, setRecording] = useState(false);
@@ -68,7 +69,7 @@ export function useRecorder() {
             setRecording(false);
             setConverting(true);
             try {
-                const wav = await toWav16kMono(new Blob(chunks, { type: recorder.mimeType }));
+                const wav = await toWav16kMono(new Blob(chunks, { type: recorder.mimeType }), { normalize: true });
                 setTake((prev) => {
                     if (prev) URL.revokeObjectURL(prev.url);
                     return { wav, url: URL.createObjectURL(wav) };

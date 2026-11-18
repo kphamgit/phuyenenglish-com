@@ -3,6 +3,7 @@ import chimeSound from "../../assets/chime.mp3";
 import api from "../../api";
 import { useWebSocket } from "../context/WebSocketContext";
 import type { WebSocketMessageProps } from "../shared/types";
+import { EvaluationView } from "./EvaluationView";
 import type { EvaluationResult, ShadowingPrompt } from "./evaluation";
 import { useRecorder } from "./useRecorder";
 
@@ -191,6 +192,13 @@ function StudentResult({ result: r }: { result: EvaluationResult }) {
             <p className="text-sm text-gray-600">
                 We heard: <span className="italic">{s.heard_transcript}</span>
             </p>
+            {/* For now, everything VoiceAnalyzer_Claude reported (same view as the teacher's). */}
+            <details open className="border-t border-teal-200 pt-2">
+                <summary className="cursor-pointer font-semibold text-teal-800">Detailed analysis</summary>
+                <div className="mt-2 overflow-x-auto text-sm">
+                    <EvaluationView result={r} />
+                </div>
+            </details>
         </div>
     );
 }
