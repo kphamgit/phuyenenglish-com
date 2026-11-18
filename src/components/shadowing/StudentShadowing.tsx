@@ -1,16 +1,15 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import chimeSound from "../../assets/chime.mp3";
 import api from "../../api";
 import { useWebSocket } from "../context/WebSocketContext";
 import type { WebSocketMessageProps } from "../shared/types";
-import { toWav16kMono } from "../shared/wav";
 import type { EvaluationResult, ShadowingPrompt } from "./evaluation";
+import { useRecorder } from "./useRecorder";
 
 // Student side of Shadowing: when the teacher sends a reference ("shadowing_prompt" ws message),
 // show the sentence and the reference to play, let the student record themselves repeating it,
 // send the recording to Django (/api/shadowing/assess/, scored by VoiceAnalyzer_Claude with the
 // teacher's options), and show the scores. The teacher gets the same result separately.
-// Recording adapted from p2p-voice-chat-admin (ReferenceRecorder.tsx).
 
 const pct = (n: number | null | undefined) => (n == null ? "–" : `${n}%`);
 
@@ -18,103 +17,38 @@ export default function StudentShadowing({ hidden = false }: { hidden?: boolean 
     const { eventEmitter } = useWebSocket();
     const [prompt, setPrompt] = useState<ShadowingPrompt | null>(null);
 
-    const [recording, setRecording] = useState(false);
-    const [converting, setConverting] = useState(false);
-    const [take, setTake] = useState<{ wav: Blob; url: string } | null>(null);
+    const { recording, converting, take, error: recorderError, record: startRecording, stop, reset } = useRecorder();
     const [assessing, setAssessing] = useState(false);
     const [result, setResult] = useState<EvaluationResult | null>(null);
-    const [error, setError] = useState<string | null>(null);
-
-    const recorderRef = useRef<MediaRecorder | null>(null);
-    const streamRef = useRef<MediaStream | null>(null);
-
-    // Let go of the microphone (the browser's "recording" indicator goes away).
-    const releaseMic = useCallback(() => {
-        streamRef.current?.getTracks().forEach((t) => t.stop());
-        streamRef.current = null;
-    }, []);
-
-    // Stop a recording in progress without keeping it.
-    const discardRecording = useCallback(() => {
-        const recorder = recorderRef.current;
-        if (recorder && recorder.state !== "inactive") {
-            recorder.onstop = null;
-            recorder.stop();
-        }
-        releaseMic();
-        setRecording(false);
-    }, [releaseMic]);
+    const [submitError, setSubmitError] = useState<string | null>(null);
+    const error = recorderError ?? submitError;
 
     useEffect(() => {
         const handleMessage = (data: WebSocketMessageProps) => {
             if (data.message_type !== "shadowing_prompt") return;
-            discardRecording();
+            reset();
             setPrompt(data.content as ShadowingPrompt);
-            setTake(null);
             setResult(null);
-            setError(null);
+            setSubmitError(null);
             new Audio(chimeSound).play().catch(() => {});
         };
         eventEmitter?.on("message", handleMessage);
         return () => {
             eventEmitter?.off("message", handleMessage);
         };
-    }, [eventEmitter, discardRecording]);
+    }, [eventEmitter, reset]);
 
-    // Leaving the page mid-recording: stop without keeping anything.
-    useEffect(() => () => discardRecording(), [discardRecording]);
-
-    const record = async () => {
-        setError(null);
-        let stream: MediaStream;
-        try {
-            // The raw microphone sound, without the browser's voice-call processing (it flattens
-            // the loudness differences word stress is judged by, and can clip consonants).
-            stream = await navigator.mediaDevices.getUserMedia({
-                audio: { autoGainControl: false, echoCancellation: false, noiseSuppression: false },
-            });
-        } catch (err) {
-            setError(
-                err instanceof DOMException && err.name === "NotAllowedError"
-                    ? "Microphone access was blocked. Allow it in the browser (the icon in the address bar) and try again."
-                    : `Couldn't use the microphone: ${err instanceof Error ? err.message : String(err)}`,
-            );
-            return;
-        }
-        streamRef.current = stream;
-        const chunks: Blob[] = [];
-        const recorder = new MediaRecorder(stream);
-        recorder.ondataavailable = (e) => {
-            if (e.data.size > 0) chunks.push(e.data);
-        };
-        recorder.onstop = async () => {
-            releaseMic();
-            setRecording(false);
-            setConverting(true);
-            try {
-                const wav = await toWav16kMono(new Blob(chunks, { type: recorder.mimeType }));
-                setTake({ wav, url: URL.createObjectURL(wav) });
-                setResult(null);
-            } catch (err) {
-                setError(`Converting the recording failed: ${err instanceof Error ? err.message : String(err)}`);
-            } finally {
-                setConverting(false);
-            }
-        };
-        recorderRef.current = recorder;
-        recorder.start();
-        setRecording(true);
-    };
-
-    const stop = () => {
-        const recorder = recorderRef.current;
-        if (recorder && recorder.state !== "inactive") recorder.stop(); // onstop converts it
+    // A new take replaces the scores of the previous one.
+    const record = () => {
+        setResult(null);
+        setSubmitError(null);
+        void startRecording();
     };
 
     const submit = async () => {
         if (!prompt || !take || assessing) return;
         setAssessing(true);
-        setError(null);
+        setSubmitError(null);
         try {
             const form = new FormData();
             form.append("shadowing_id", prompt.shadowing_id);
@@ -124,18 +58,17 @@ export default function StudentShadowing({ hidden = false }: { hidden?: boolean 
         } catch (err) {
             console.error("StudentShadowing: assessment failed:", err);
             const message = (err as { response?: { data?: { error?: string } } }).response?.data?.error;
-            setError(message ?? "Scoring your recording failed. Please try again.");
+            setSubmitError(message ?? "Scoring your recording failed. Please try again.");
         } finally {
             setAssessing(false);
         }
     };
 
     const dismiss = () => {
-        discardRecording();
+        reset();
         setPrompt(null);
-        setTake(null);
         setResult(null);
-        setError(null);
+        setSubmitError(null);
     };
 
     if (!prompt || hidden) return null;
@@ -151,7 +84,7 @@ export default function StudentShadowing({ hidden = false }: { hidden?: boolean 
 
                 <div className="flex flex-wrap items-center justify-center gap-3">
                     <button
-                        onClick={() => void record()}
+                        onClick={record}
                         disabled={recording || converting || assessing}
                         className="px-4 py-2 rounded-md bg-red-600 hover:bg-red-700 text-white disabled:opacity-50"
                     >

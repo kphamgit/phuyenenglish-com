@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import api from "../api";
 import { toWav16kMono, wavFileName } from "./shared/wav";
-import { DEFAULT_FALL_MATCH_RATIO, DEFAULT_RISE_MATCH_RATIO } from "./shadowing/evaluation";
+import { DEFAULT_FALL_MATCH_RATIO, DEFAULT_RISE_MATCH_RATIO, type EvaluationResult } from "./shadowing/evaluation";
+import { EvaluationView } from "./shadowing/EvaluationView";
 import ShadowingResults from "./shadowing/ShadowingResults";
+import { useRecorder } from "./shadowing/useRecorder";
 
 // Teacher-only "Shadowing": generate a reference recording of a sentence with ElevenLabs
 // (/api/eleven_lab_tts/) or Google TTS (/english/google_tts/), replay it, and save it as a
@@ -10,6 +12,8 @@ import ShadowingResults from "./shadowing/ShadowingResults";
 // p2p-voice-chat-admin (VoiceAnalyzerPanel.tsx).
 // "Send to Students" (/api/shadowing/send/) shares the reference with the scoring options set
 // here; each student records themselves repeating it and VoiceAnalyzer_Claude scores them.
+// "Test it yourself" (/api/shadowing/test/) lets the teacher record and be scored the same way,
+// with the same options, without sending anything to the students.
 
 type Provider = "elevenlabs" | "google";
 
@@ -80,6 +84,12 @@ export default function Shadowing() {
     const [sentId, setSentId] = useState<string | undefined>(undefined);
     const [sending, setSending] = useState(false);
 
+    // Teacher's own test take and its scores.
+    const recorder = useRecorder();
+    const [testing, setTesting] = useState(false);
+    const [testResult, setTestResult] = useState<EvaluationResult | null>(null);
+    const [testError, setTestError] = useState<string | null>(null);
+
     const text = sentence.trim();
     // The reference must say the sentence that's typed now.
     const referenceReady = reference !== null && reference.sentence === text;
@@ -128,6 +138,41 @@ export default function Shadowing() {
         }
     };
 
+    // The scoring options as form fields (sent with the exercise, or with a test).
+    const appendOptions = (form: FormData) => {
+        form.append("targeted_words", targetedWords.trim());
+        form.append("strict_connected_speech", String(strictConnectedSpeech || targetedWords.trim() !== ""));
+        form.append("fall_match_ratio", String(fallMatchRatio));
+        form.append("rise_match_ratio", String(riseMatchRatio));
+    };
+
+    const recordTest = () => {
+        setTestResult(null);
+        setTestError(null);
+        void recorder.record();
+    };
+
+    const scoreTest = async () => {
+        if (!reference || !referenceReady || !recorder.take || testing) return;
+        setTesting(true);
+        setTestError(null);
+        try {
+            const form = new FormData();
+            form.append("reference_file", reference.blob, "reference.mp3");
+            form.append("recorded_file", recorder.take.wav, "recording.wav");
+            form.append("sentence", reference.sentence);
+            appendOptions(form);
+            const res = await api.post("/api/shadowing/test/", form);
+            setTestResult(res.data as EvaluationResult);
+        } catch (err) {
+            console.error("Shadowing: test scoring failed:", err);
+            const message = (err as { response?: { data?: { error?: string } } }).response?.data?.error;
+            setTestError(message ?? "Scoring the recording failed.");
+        } finally {
+            setTesting(false);
+        }
+    };
+
     const sendToStudents = async () => {
         if (!reference || !referenceReady || sending) return;
         setSending(true);
@@ -137,10 +182,7 @@ export default function Shadowing() {
             form.append("reference_file", reference.blob, "reference.mp3");
             form.append("sentence", reference.sentence);
             form.append("voice", reference.voice);
-            form.append("targeted_words", targetedWords.trim());
-            form.append("strict_connected_speech", String(strictConnectedSpeech || targetedWords.trim() !== ""));
-            form.append("fall_match_ratio", String(fallMatchRatio));
-            form.append("rise_match_ratio", String(riseMatchRatio));
+            appendOptions(form);
             const res = await api.post("/api/shadowing/send/", form);
             setSentId(res.data.shadowing_id);
         } catch (err) {
@@ -297,6 +339,56 @@ export default function Shadowing() {
                     </button>
                     {!referenceReady && <span className="text-sm text-gray-600">Generate the reference first.</span>}
                 </div>
+            </fieldset>
+
+            {/* The teacher records the sentence and is scored against the reference with the
+                options above. Nothing goes to the students. */}
+            <fieldset className="flex flex-col gap-3 rounded-md border border-gray-400 p-3">
+                <legend className="px-1 text-sm font-semibold">Test it yourself</legend>
+                <div className="flex flex-wrap items-center gap-3">
+                    <button
+                        onClick={recordTest}
+                        disabled={!referenceReady || recorder.recording || recorder.converting || testing}
+                        className="px-4 py-2 rounded-md bg-red-600 hover:bg-red-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        {recorder.take ? "Record again" : "Record"}
+                    </button>
+                    <button
+                        onClick={recorder.stop}
+                        disabled={!recorder.recording}
+                        className="px-4 py-2 rounded-md bg-gray-300 hover:bg-gray-400 text-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        Stop
+                    </button>
+                    {recorder.recording && (
+                        <span className="flex items-center gap-2 text-sm text-red-600" role="status">
+                            <span className="inline-block h-2.5 w-2.5 animate-pulse rounded-full bg-red-600" />
+                            Recording… say the sentence, then click Stop.
+                        </span>
+                    )}
+                    {recorder.converting && <span className="text-sm text-gray-600">Preparing the recording…</span>}
+                    {!referenceReady && <span className="text-sm text-gray-600">Generate the reference first.</span>}
+                </div>
+                {recorder.take && !recorder.recording && (
+                    <div className="flex flex-wrap items-center gap-3">
+                        <audio key={recorder.take.url} src={recorder.take.url} controls className="min-w-0 flex-1" />
+                        <button
+                            onClick={() => void scoreTest()}
+                            disabled={!referenceReady || testing}
+                            className="px-4 py-2 rounded-md bg-teal-600 hover:bg-teal-700 text-white font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            {testing ? "Scoring…" : "Score my recording"}
+                        </button>
+                    </div>
+                )}
+                {(recorder.error ?? testError) && (
+                    <p className="text-sm text-red-600" role="alert">⚠️ {recorder.error ?? testError}</p>
+                )}
+                {testResult && (
+                    <div className="bg-white rounded-md p-3">
+                        <EvaluationView result={testResult} />
+                    </div>
+                )}
             </fieldset>
 
             {provider === "elevenlabs" && voicesError && <p className="text-sm text-red-600">⚠️ {voicesError}</p>}
