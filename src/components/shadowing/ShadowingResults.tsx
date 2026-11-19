@@ -3,7 +3,7 @@ import api from "../../api";
 import { useWebSocket } from "../context/WebSocketContext";
 import type { WebSocketMessageProps } from "../shared/types";
 import { EvaluationView } from "./EvaluationView";
-import type { ShadowingResult } from "./evaluation";
+import { RISING_TONE_ENABLED, type ShadowingResult } from "./evaluation";
 
 // Teacher-only: each student's latest score for the current shadowing exercise. Loads the latest
 // exercise and its results from Django (so a page refresh keeps them), then adds results live as
@@ -19,6 +19,10 @@ interface Exercise {
         strict_connected_speech: boolean;
         fall_match_ratio: number;
         rise_match_ratio: number;
+        link_tolerance?: number; // missing on exercises sent before it existed
+        stress_words?: string; // Word Syllables Stress Check words (blank or missing = not checked)
+        stress_contrast_ratio?: number;
+        melody_min_similarity?: number; // missing on exercises sent before it existed
     };
 }
 
@@ -61,6 +65,11 @@ export default function ShadowingResults({ shadowingId }: { shadowingId?: string
     const rows = Object.values(results)
         .filter((r) => r.shadowing_id === exercise?.shadowing_id)
         .sort((a, b) => a.user_name.localeCompare(b.user_name));
+    // Linking is only checked (and shown) when strict connected speech is on (targeted words turn it on).
+    const linking = !exercise || exercise.options.strict_connected_speech || exercise.options.targeted_words.trim() !== "";
+    // Word stress is only checked (and shown) when the exercise has stress words.
+    const wordStress = !exercise || (exercise.options.stress_words ?? "").trim() !== "";
+    const columns = 6 + (wordStress ? 1 : 0) + (RISING_TONE_ENABLED ? 1 : 0) + (linking ? 1 : 0);
 
     return (
         <div className="flex flex-col gap-2 bg-white rounded-md p-3 border border-gray-300">
@@ -74,6 +83,7 @@ export default function ShadowingResults({ shadowingId }: { shadowingId?: string
                         “{exercise.sentence}” · sent {new Date(exercise.sent_at).toLocaleTimeString()}
                         {exercise.voice && <> · {exercise.voice}</>}
                         {exercise.options.targeted_words && <> · targeted: {exercise.options.targeted_words}</>}
+                        {exercise.options.stress_words && <> · stress words: {exercise.options.stress_words}</>}
                     </p>
                     {rows.length === 0 ? (
                         <p className="text-sm text-gray-600">No student has submitted yet.</p>
@@ -84,9 +94,9 @@ export default function ShadowingResults({ shadowingId }: { shadowingId?: string
                                     <th className={cell}>Student</th>
                                     <th className={cell}>Overall</th>
                                     <th className={cell}>Pronunciation</th>
-                                    <th className={cell}>Stress</th>
-                                    <th className={cell}>Intonation</th>
-                                    <th className={cell}>Linking</th>
+                                    {wordStress && <th className={cell}>Word stress</th>}
+                                    {RISING_TONE_ENABLED && <th className={cell}>Intonation</th>}
+                                    {linking && <th className={cell}>Linking</th>}
                                     <th className={cell}>Heard</th>
                                     <th className={cell}>Attempts</th>
                                     <th className={cell}></th>
@@ -102,9 +112,9 @@ export default function ShadowingResults({ shadowingId }: { shadowingId?: string
                                                 <td className={`${cell} font-semibold`}>{r.user_name}</td>
                                                 <td className={`${cell} font-bold`}>{pct(s.overall_score_pct)}</td>
                                                 <td className={cell}>{pct(s.pronunciation_score_pct)}</td>
-                                                <td className={cell}>{pct(s.stress_match_pct)}</td>
-                                                <td className={cell}>{pct(s.intonation_score_pct)}</td>
-                                                <td className={cell}>{s.connected_speech_summary}</td>
+                                                {wordStress && <td className={cell}>{pct(s.stress_match_pct)}</td>}
+                                                {RISING_TONE_ENABLED && <td className={cell}>{pct(s.intonation_score_pct)}</td>}
+                                                {linking && <td className={cell}>{s.connected_speech_summary}</td>}
                                                 <td className={`${cell} font-mono`}>{s.heard_transcript}</td>
                                                 <td className={cell} title={`Last: ${new Date(r.at).toLocaleTimeString()}`}>{r.attempt}</td>
                                                 <td className={cell}>
@@ -118,8 +128,8 @@ export default function ShadowingResults({ shadowingId }: { shadowingId?: string
                                             </tr>
                                             {open && (
                                                 <tr>
-                                                    <td colSpan={9} className="p-2 bg-gray-50">
-                                                        <EvaluationView result={r.evaluation} />
+                                                    <td colSpan={columns} className="p-2 bg-gray-50">
+                                                        <EvaluationView result={r.evaluation} teacher />
                                                     </td>
                                                 </tr>
                                             )}
