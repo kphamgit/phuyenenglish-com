@@ -23,6 +23,7 @@ interface Exercise {
         stress_words?: string; // Word Syllables Stress Check words (blank or missing = not checked)
         stress_contrast_ratio?: number;
         melody_min_similarity?: number; // missing on exercises sent before it existed
+        stress_source?: "dictionary" | "reference";
     };
 }
 

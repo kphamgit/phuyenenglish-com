@@ -5,11 +5,13 @@ import {
     DEFAULT_LINK_TOLERANCE,
     DEFAULT_RISE_MATCH_RATIO,
     DEFAULT_MELODY_MIN_SIMILARITY,
+    DEFAULT_STRESS_SOURCE,
     DEFAULT_STRESS_CONTRAST_RATIO,
     LEGACY_STRESS_ENABLED,
     LINK_PAUSE_MARGIN_MS,
     RISING_TONE_ENABLED,
     type EvaluationResult,
+    type StressSource,
 } from "./shadowing/evaluation";
 import { EvaluationView } from "./shadowing/EvaluationView";
 import ShadowingResults from "./shadowing/ShadowingResults";
@@ -171,6 +173,9 @@ export default function Shadowing() {
     const [stressContrastRatio, setStressContrastRatio] = useState(DEFAULT_STRESS_CONTRAST_RATIO);
     // How closely each stress word's melody (pitch shape) must follow the reference's. Higher = stricter.
     const [melodyMinSimilarity, setMelodyMinSimilarity] = useState(DEFAULT_MELODY_MIN_SIMILARITY);
+    // Which syllable of each stress word should be stressed: the CMU dictionary's (the reference
+    // audio as fallback, e.g. at the end of a Yes/No question) or the reference audio's.
+    const [stressSource, setStressSource] = useState<StressSource>(DEFAULT_STRESS_SOURCE);
     // The scoring options' help (opened with the Help button next to the stress options).
     const [showHelp, setShowHelp] = useState(false);
 
@@ -342,6 +347,7 @@ export default function Shadowing() {
         form.append("stress_words", words);
         form.append("stress_contrast_ratio", String(words ? stressContrastRatio : DEFAULT_STRESS_CONTRAST_RATIO));
         form.append("melody_min_similarity", String(words ? melodyMinSimilarity : DEFAULT_MELODY_MIN_SIMILARITY));
+        form.append("stress_source", stressSource);
     };
 
     const recordTest = () => {
@@ -773,6 +779,31 @@ export default function Shadowing() {
                         <LinkToleranceSlider value={linkTolerance} onChange={setLinkTolerance} />
                     )}
                 </div>
+                {/* Where the right stressed syllable of each stress word comes from. */}
+                <div role="radiogroup" aria-label="Stress pattern source" className="flex flex-wrap items-center gap-x-5 gap-y-1 text-sm">
+                    {([
+                        ["dictionary", "Use stress pattern from CMU dictionary"],
+                        ["reference", "Use stress pattern from reference audio"],
+                    ] as const).map(([value, label]) => (
+                        <label key={value} className="flex items-center gap-1.5 cursor-pointer">
+                            <input
+                                type="radio"
+                                name="stress-source"
+                                value={value}
+                                checked={stressSource === value}
+                                onChange={() => setStressSource(value)}
+                            />
+                            {label}
+                            {value === DEFAULT_STRESS_SOURCE && <span className="text-gray-600">(default)</span>}
+                        </label>
+                    ))}
+                </div>
+                {stressSource === "dictionary" && (
+                    <p className="-mt-1 text-xs text-gray-600">
+                        The reference audio decides only when the dictionary can't: the last word of a Yes/No question,
+                        a word that isn't in the dictionary, or a word with two stress patterns (record, present).
+                    </p>
+                )}
                 <div className="flex flex-wrap items-end gap-4">
                     {/* Word Syllables Stress Check: which syllable is stressed inside each word given here. */}
                     <label className="flex flex-col gap-1">
@@ -992,11 +1023,21 @@ function ScoringHelp({ onClose }: { onClose: () => void }) {
                     is required: you can't send or score until it has at least one word. The <strong>Stress contrast</strong>{" "}
                     slider appears once you type a word.
                 </p>
-                <p className="mt-1">Each word is judged in two steps, against the reference recording:</p>
+                <p className="mt-1">
+                    <strong>Which syllable is right?</strong> With <strong>Use stress pattern from CMU dictionary</strong>{" "}
+                    (the default), the dictionary decides (ac-<strong>CEPT</strong>, a-<strong>POL</strong>-o-gy). The
+                    reference audio decides only when the dictionary can't: the last word of a Yes/No question (“Do
+                    you play basket<strong>BALL</strong>?”, where the rising voice often moves the stress), a word
+                    that isn't in the dictionary, or a word with two stress patterns (<strong>REC</strong>-ord /
+                    re-<strong>CORD</strong>). With <strong>Use stress pattern from reference audio</strong>, the
+                    syllable the reference voice made strongest is always the right one. The results table shows,
+                    under <em>Expected</em>, which one decided.
+                </p>
+                <p className="mt-1">Each word is then judged in two steps:</p>
                 <ol className="ml-5 list-decimal">
                     <li>
-                        <strong>Right syllable:</strong> the student must stress the same syllable as the reference
-                        (ac-<strong>CEPT</strong>, a-<strong>POL</strong>-o-gy). If not, the word gets{" "}
+                        <strong>Right syllable:</strong> the student must stress the expected syllable. If not, the
+                        word gets{" "}
                         <em>✗ Wrong syllable</em> and 0%, with a hint like “Stress the 2nd syllable (○ ●), not the
                         1st (● ○)”.
                     </li>
@@ -1017,7 +1058,7 @@ function ScoringHelp({ onClose }: { onClose: () => void }) {
                 <p className="mt-1">
                     Suggested: <strong>50–60%</strong> for beginners, <strong>75%</strong> for most classes,{" "}
                     <strong>90–100%</strong> for advanced students. Choose words with a clear stress, and listen to
-                    the reference first: the reference decides which syllable is “right”. The word stress score
+                    the reference first, especially when it decides the stress (Yes/No questions). The word stress score
                     counts for 45% of the overall score (pronunciation 55%). With no stress words, the overall
                     score is pronunciation only.
                 </p>

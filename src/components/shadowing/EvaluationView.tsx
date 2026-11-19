@@ -93,7 +93,7 @@ function WordStressTable({ words, teacher = false }: { words: WordStress[]; teac
         <thead>
           <tr className="text-gray-500">
             <th className={cell}>Word</th>
-            <th className={cell}>Reference</th>
+            <th className={cell}>Expected</th>
             <th className={cell}>Yours</th>
             <th className={cell}>Result</th>
             <th className={cell}>Score</th>
@@ -102,10 +102,17 @@ function WordStressTable({ words, teacher = false }: { words: WordStress[]; teac
         </thead>
         <tbody>
           {words.map((w, i) => {
+            // The syllable to stress (results scored before the stress source option: the reference's).
+            const expectedPattern = w.expected_pattern ?? w.reference_pattern;
+            const expected = w.expected_stressed_syllable ?? w.reference_stressed_syllable;
+            const source = w.stress_source ?? (w.reference_pattern ? 'reference' : null);
             // Same stress pattern: both stressed circles green; different: yours amber.
-            const same = w.right_syllable ?? (w.reference_pattern != null && w.reference_pattern === w.recorded_pattern);
+            const same = w.right_syllable ?? (expectedPattern != null && expectedPattern === w.recorded_pattern);
             // The syllables as spelled (from the dictionary), if they fit the analyzer's count.
-            const parts = fitParts(w.hyphenated, w.reference_pattern);
+            const parts = fitParts(w.hyphenated, expectedPattern);
+            // Teacher: when the dictionary decided and the reference voice stressed another syllable.
+            const refDiffers =
+              teacher && source === 'dictionary' && w.reference_stressed_syllable != null && w.reference_stressed_syllable !== expected;
             // The melody row only when at least two syllables were compared (one syllable has no melody to follow).
             const melody = (w.pitch_direction?.contour_syllables?.length ?? 0) >= 2 ? w.pitch_direction : undefined;
             const rowCell = melody ? cell.replace('border-b border-gray-200', '') : cell;
@@ -114,9 +121,24 @@ function WordStressTable({ words, teacher = false }: { words: WordStress[]; teac
                 <tr>
                   <td className={`${rowCell} font-semibold`}>{w.word}</td>
                   <td className={`${rowCell} whitespace-nowrap`}>
-                    <StressPattern pattern={w.reference_pattern} tone="green" />
-                    <span className="text-gray-500 text-xs">{which(w.reference_stressed_syllable)}</span>
-                    {parts && <Spelled parts={parts} stressed={w.reference_stressed_syllable} />}
+                    <StressPattern pattern={expectedPattern} tone="green" />
+                    <span className="text-gray-500 text-xs">{which(expected)}</span>
+                    {parts && <Spelled parts={parts} stressed={expected} />}
+                    {source && (
+                      <div className="text-[11px] text-gray-500 whitespace-normal">
+                        {source === 'dictionary' ? 'from the dictionary' : 'from the reference voice'}
+                        {w.stress_source_reason && <> ({w.stress_source_reason})</>}
+                      </div>
+                    )}
+                    {refDiffers && (
+                      <div className="text-[11px] text-amber-700 whitespace-normal">
+                        The reference voice stressed{' '}
+                        {parts?.[w.reference_stressed_syllable! - 1]
+                          ? `“${parts[w.reference_stressed_syllable! - 1]}”`
+                          : `syllable ${w.reference_stressed_syllable}`}
+                        .
+                      </div>
+                    )}
                   </td>
                   <td className={`${rowCell} whitespace-nowrap`}>
                     <StressPattern pattern={w.recorded_pattern} tone={same ? 'green' : 'amber'} />
@@ -131,7 +153,7 @@ function WordStressTable({ words, teacher = false }: { words: WordStress[]; teac
                     {w.status === 'pass' ? (
                       w.weakest_contrast_pct != null ? (
                         <span title={teacher ? `Contrast ${w.weakest_contrast_pct}% of the reference's` : undefined}>
-                          {contrastInWords(w.weakest_contrast_pct, w.reference_stressed_syllable, parts, teacher)}
+                          {contrastInWords(w.weakest_contrast_pct, expected, parts, teacher)}
                         </span>
                       ) : (
                         '–'
@@ -402,14 +424,42 @@ export function EvaluationView({
   const sentenceRows: [string, React.ReactNode, React.ReactNode, boolean | undefined][] = [
     ['Words', s.spoken_text, s.heard_transcript, a?.word_match_vs_target_pct == null ? undefined : a.word_match_vs_target_pct >= 100],
   ];
-  // The sounds as ARPAbet / IPA codes: teacher only.
+  // The sounds as ARPAbet / IPA codes: teacher only, for the stress words, one per line: the
+  // CMU dictionary's ARPAbet with its stress digits, and what was heard in the recording.
+  const stressWordSet = new Set((r.word_stress_check?.enabled ? r.word_stress_check.stress_words : []).map((w) => w.toLowerCase()));
+  const isStressWord = (word: string) => stressWordSet.has(word.replace(/[^A-Za-z']/g, '').toLowerCase());
   if (!student) {
-    sentenceRows.push([
-      'Sounds',
-      <span className="font-mono">{words.map((w) => w.expected_phonemes).join(' | ')}</span>,
-      <span className="font-mono">{s.recorded_timit_ipa}</span>,
-      words.length ? words.every((w) => w.status === 'Clear') : undefined,
-    ]);
+    const cmuWords = (r.cmu_arpabet ?? []).filter((w) => isStressWord(w.word));
+    const heardWords = words.filter((w) => isStressWord(w.word));
+    if (stressWordSet.size > 0 && (cmuWords.length > 0 || heardWords.length > 0)) {
+      sentenceRows.push([
+        'Sounds',
+        <div className="flex flex-col font-mono">
+          {cmuWords.length > 0
+            ? cmuWords.map((w, i) => (
+                <span key={i}>
+                  <span className="font-sans text-gray-500">{w.word}:</span>{' '}
+                  {w.arpabet ? <ArpabetStress arpabet={w.arpabet} /> : '(not in the dictionary)'}
+                </span>
+              ))
+            : heardWords.map((w, i) => (
+                <span key={i}>
+                  <span className="font-sans text-gray-500">{w.word}:</span>{' '}
+                  <span className={ARPABET_LETTERS}>{w.expected_phonemes}</span>
+                </span>
+              ))}
+        </div>,
+        <div className="flex flex-col font-mono">
+          {heardWords.map((w, i) => (
+            <span key={i}>
+              <span className="font-sans text-gray-500">{w.word}:</span>{' '}
+              <span className={ARPABET_LETTERS}>{w.heard_phonemes}</span> {w.heard_ipa}
+            </span>
+          ))}
+        </div>,
+        heardWords.length ? heardWords.every((w) => w.status === 'Clear') : undefined,
+      ]);
+    }
   }
   // The earlier sentence-wide stress and pitch rows, replaced by the Word Syllables Stress Check.
   if (LEGACY_STRESS_ENABLED) {
@@ -605,6 +655,7 @@ export function EvaluationView({
             <>
               stress words: {ws.stress_words.join(', ')} · stress contrast {ratio(ws.contrast_ratio)}
               {ws.melody_min_similarity != null && <> · melody match {ratio(ws.melody_min_similarity)}</>}
+              {ws.stress_source && <> · stress pattern from {ws.stress_source === 'dictionary' ? 'CMU dictionary' : 'reference audio'}</>}
             </>
           ) : (
             'word stress not checked'
@@ -631,6 +682,36 @@ export function EvaluationView({
         </pre>
       </details>
     </div>
+  );
+}
+
+// ARPAbet letters in dark brown (the teacher's Sounds row).
+const ARPABET_LETTERS = 'text-[#5C3A1E]';
+
+// ARPAbet such as "B AE1 S K AH0 T B AO2 L": the letters dark brown, the primary-stress digit 1
+// in bold dark green, the other digits as they are.
+function ArpabetStress({ arpabet }: { arpabet: string }) {
+  return (
+    <>
+      {arpabet.split(' ').map((ph, i) => {
+        const m = ph.match(/^(.*?)(\d?)$/);
+        const letters = m?.[1] ?? ph;
+        const digit = m?.[2] ?? '';
+        return (
+          <Fragment key={i}>
+            {i > 0 && ' '}
+            <span className={ARPABET_LETTERS}>{letters}</span>
+            {digit === '1' ? (
+              <strong className="relative -top-0.5 ml-px inline-flex h-4 w-4 items-center justify-center rounded-full border border-green-700 bg-green-100 align-baseline text-[11px] leading-none text-green-800">
+                1
+              </strong>
+            ) : (
+              digit
+            )}
+          </Fragment>
+        );
+      })}
+    </>
   );
 }
 

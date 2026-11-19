@@ -20,6 +20,10 @@ export const LINK_PAUSE_MARGIN_MS = 25; // the extra pause allowed at 1×
 export const DEFAULT_STRESS_CONTRAST_RATIO = 0.6;
 // Melody of each stress word: the shape similarity needed for "Same melody" (0.1-0.9; higher = stricter).
 export const DEFAULT_MELODY_MIN_SIMILARITY = 0.35;
+// Which syllable should be stressed: from the CMU dictionary (the reference audio as fallback) or
+// from the reference audio.
+export type StressSource = 'dictionary' | 'reference';
+export const DEFAULT_STRESS_SOURCE: StressSource = 'dictionary';
 
 // Checks that are paused in the service (their code is kept). The sentence-level rising
 // tone (end of a Yes/No question) spans words; the older Falling tone and the sentence-wide
@@ -101,7 +105,14 @@ export interface PitchDirection {
 export interface WordStress {
   word: string;
   syllable_count?: number;
-  reference_stressed_syllable?: number | null; // 1-based
+  // The syllable the student should stress (1-based) and its pattern, and where that came from:
+  // "dictionary" (CMU) or "reference" (the reference audio; in dictionary mode, see the reason).
+  // Missing on results scored before the stress source option (the reference decided then).
+  expected_stressed_syllable?: number | null;
+  expected_pattern?: string | null;
+  stress_source?: 'dictionary' | 'reference' | null;
+  stress_source_reason?: string | null; // e.g. "end of a Yes/No question"
+  reference_stressed_syllable?: number | null; // 1-based, what the reference audio stressed (measured)
   recorded_stressed_syllable?: number | null;
   reference_pattern?: string | null; // e.g. "○ ●" (● = stressed)
   recorded_pattern?: string | null;
@@ -122,6 +133,7 @@ export interface WordStressCheck {
   stress_words: string[];
   contrast_ratio: number;
   melody_min_similarity?: number; // the similarity needed for "Same melody" (missing on older results)
+  stress_source?: 'dictionary' | 'reference'; // the teacher's choice (missing on older results)
   score_pct: number | null;
   pitch_direction_score_pct?: number | null; // not part of score_pct or the overall score
   words: WordStress[];
@@ -138,6 +150,7 @@ export interface EvaluationResult {
     stress_words?: string[];
     stress_contrast_ratio?: number;
     melody_min_similarity?: number; // the similarity needed for "Same melody"
+    stress_source?: 'dictionary' | 'reference';
     overall_score_pct: number;
     pronunciation_score_pct: number;
     stress_match_pct: number | null; // the Word Syllables Stress Check score (null when no stress words)
@@ -157,6 +170,9 @@ export interface EvaluationResult {
   stage3_stress?: { stress_evaluation?: { word_comparisons?: StressComparison[] } };
   stage4_pronunciation?: { word_pronunciations?: EvaluationWord[] };
   word_stress_check?: WordStressCheck;
+  // Added by Django: each word with its CMU dictionary ARPAbet and the dictionary's own stress
+  // digits (1 = primary, 2 = secondary, 0 = unstressed); arpabet null if not in the dictionary.
+  cmu_arpabet?: { word: string; arpabet: string | null }[];
   intonation?: IntonationEvaluation;
 }
 
