@@ -354,7 +354,8 @@ function PitchDirectionCell({ d, parts = null }: { d: PitchDirection; parts?: st
 
 // Two pitch curves (semitones) on one small chart: reference dashed grey, yours solid blue,
 // with a light line between syllables and each syllable underneath (its spelling, or its number).
-function ContourChart({
+// Without `recorded` it draws the reference alone (the teacher's "Analyze reference audio").
+export function ContourChart({
   reference,
   recorded,
   perSyllable,
@@ -362,7 +363,7 @@ function ContourChart({
   parts = null,
 }: {
   reference: number[];
-  recorded: number[];
+  recorded?: number[];
   perSyllable: number;
   syllables: number[];
   parts?: string[] | null; // the syllables as spelled; labels the chart instead of the numbers
@@ -370,16 +371,22 @@ function ContourChart({
   const W = 180;
   const H = 64;
   const pad = 4;
-  const all = [...reference, ...recorded];
+  const all = [...reference, ...(recorded ?? [])];
   const lo = Math.min(...all);
   const hi = Math.max(...all);
   const span = Math.max(hi - lo, 1);
-  const n = Math.max(reference.length, recorded.length);
+  const n = Math.max(reference.length, recorded?.length ?? 0);
   const x = (i: number) => pad + (i / Math.max(n - 1, 1)) * (W - 2 * pad);
   const y = (v: number) => pad + (1 - (v - lo) / span) * (H - 2 * pad - 10);
   const path = (vals: number[]) => vals.map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
   return (
-    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Pitch curves: reference and yours">
+    <svg
+      width={W}
+      height={H}
+      viewBox={`0 0 ${W} ${H}`}
+      role="img"
+      aria-label={recorded ? 'Pitch curves: reference and yours' : 'Pitch curve of the reference'}
+    >
       {syllables.map((num, k) => {
         const x0 = x(k * perSyllable);
         const x1 = x(Math.min((k + 1) * perSyllable, n) - 1);
@@ -393,7 +400,7 @@ function ContourChart({
         );
       })}
       <path d={path(reference)} fill="none" stroke="#9ca3af" strokeWidth="2" strokeDasharray="4 3" />
-      <path d={path(recorded)} fill="none" stroke="#2563eb" strokeWidth="2" />
+      {recorded && <path d={path(recorded)} fill="none" stroke="#2563eb" strokeWidth="2" />}
     </svg>
   );
 }

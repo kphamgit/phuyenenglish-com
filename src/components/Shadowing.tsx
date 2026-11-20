@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import api from "../api";
+import { toast } from "react-toastify";
 import {
     DEFAULT_FALL_MATCH_RATIO,
     DEFAULT_LINK_TOLERANCE,
@@ -14,12 +15,13 @@ import {
     type StressSource,
 } from "./shadowing/evaluation";
 import { EvaluationView } from "./shadowing/EvaluationView";
+import { ReferenceAnalysisView, type ReferenceAnalysis, type ReferenceWordAnalysis } from "./shadowing/ReferenceAnalysisView";
 import ShadowingResults from "./shadowing/ShadowingResults";
 import { useRecorder } from "./shadowing/useRecorder";
 
 // Teacher-only "Shadowing": generate a reference recording of a sentence with ElevenLabs
 // (/api/eleven_lab_tts/), Google TTS (/english/google_tts/) or Amazon Polly, replay it, and keep
-// it with "Save Sentence to S3" (/api/shadowing/save_sentence/). Adapted from the reference part
+// it with "Save Sentence" (/api/shadowing/save_sentence/). Adapted from the reference part
 // of the VoiceAnalyzer1 tab in p2p-voice-chat-admin (VoiceAnalyzerPanel.tsx).
 // "Send to Students" (/api/shadowing/send/) shares the reference with the scoring options set
 // here; each student records themselves repeating it and VoiceAnalyzer_Claude scores them.
@@ -99,7 +101,7 @@ const CHIRP3_VOICES: { name: string; gender: "female" | "male" }[] = [
     { name: "Zephyr", gender: "female" }, { name: "Zubenelgenubi", gender: "male" },
 ];
 const chirp3Id = (name: string) => `en-US-Chirp3-HD-${name}`;
-// A reference sentence saved with "Save Sentence to S3" (/api/shadowing/sentences/).
+// A reference sentence saved with "Save Sentence" (/api/shadowing/sentences/).
 interface SavedSentence {
     id: number; sentence: string; tts_text: string; keywords: string[]; voice: string;
     tts: { provider: string | null; voice: string | null; speed: number | null; ssml_rate: string | null };
@@ -115,6 +117,83 @@ interface Reference {
 const DEFAULT_VOICE: Record<Provider, string> = {
     elevenlabs: "River", google: chirp3Id("Charon"), google_neural: neural2Id("D"), polly: "Matthew",
 };
+
+// 3.4 → "0:03"
+function formatTime(seconds: number): string {
+    const s = Math.floor(seconds);
+    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
+// The audio that a PlayButton is playing now, so that starting another one stops it.
+let playingAudio: HTMLAudioElement | null = null;
+
+// A round play button (a triangle in a circle) in place of the browser's audio controls; it shows
+// a pause sign while playing, and a second click stops.
+// With showTime it also shows "elapsed / length" (no progress bar), and a second click pauses
+// rather than stops, so the next click carries on from there.
+function PlayButton({ src, label, showTime = false }: { src: string; label: string; showTime?: boolean }) {
+    const audioRef = useRef<HTMLAudioElement>(null);
+    const [playing, setPlaying] = useState(false);
+    const [elapsed, setElapsed] = useState(0);
+    const [length, setLength] = useState<number | null>(null);
+    const toggle = (e: React.MouseEvent) => {
+        e.preventDefault(); // the button sits inside the row's label: don't tick the checkbox
+        const audio = audioRef.current;
+        if (!audio) return;
+        if (!audio.paused) {
+            audio.pause();
+            return;
+        }
+        if (playingAudio && playingAudio !== audio) playingAudio.pause();
+        playingAudio = audio;
+        if (!showTime) audio.currentTime = 0;
+        void audio.play().catch((err) => console.error("Shadowing: can't play the saved audio:", err));
+    };
+    return (
+        <>
+            <button
+                type="button"
+                onClick={toggle}
+                aria-label={`${playing ? (showTime ? "Pause" : "Stop") : "Play"} “${label}”`}
+                title={playing ? (showTime ? "Pause" : "Stop") : "Play"}
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border-2 border-blue-600 text-blue-600 hover:bg-blue-50"
+            >
+                {playing ? (
+                    <svg viewBox="0 0 12 12" className="h-3 w-3" fill="currentColor" aria-hidden="true">
+                        <rect x="2" y="1.5" width="3" height="9" />
+                        <rect x="7" y="1.5" width="3" height="9" />
+                    </svg>
+                ) : (
+                    <svg viewBox="0 0 12 12" className="ml-0.5 h-3 w-3" fill="currentColor" aria-hidden="true">
+                        <path d="M2.5 1.2v9.6L10.5 6z" />
+                    </svg>
+                )}
+            </button>
+            {showTime && (
+                <span className="text-sm tabular-nums text-gray-700">
+                    {formatTime(elapsed)} / {length === null ? "–:––" : formatTime(length)}
+                </span>
+            )}
+            <audio
+                ref={audioRef}
+                src={src}
+                preload={showTime ? "metadata" : "none"}
+                onPlay={() => setPlaying(true)}
+                onPause={() => setPlaying(false)}
+                onEnded={() => setPlaying(false)}
+                onTimeUpdate={(e) => setElapsed(e.currentTarget.currentTime)}
+                onLoadedMetadata={(e) => {
+                    const d = e.currentTarget.duration;
+                    setLength(Number.isFinite(d) ? d : null);
+                }}
+                onDurationChange={(e) => {
+                    const d = e.currentTarget.duration;
+                    if (Number.isFinite(d)) setLength(d);
+                }}
+            />
+        </>
+    );
+}
 
 export default function Shadowing() {
     const [sentence, setSentence] = useState("");
@@ -148,7 +227,7 @@ export default function Shadowing() {
     const [reference, setReference] = useState<Reference | null>(null);
     // "Use audio from": a sentence saved in S3, or a new one generated with a TTS provider.
     const [audioSource, setAudioSource] = useState<"s3" | "tts">("tts");
-    // From S3 Storage: the keyword search and its results.
+    // From Database (pointing to S3 storage): the keyword search and its results.
     const [searchQuery, setSearchQuery] = useState("");
     const [searchResults, setSearchResults] = useState<SavedSentence[] | null>(null);
     const [searching, setSearching] = useState(false);
@@ -169,13 +248,21 @@ export default function Shadowing() {
     const [linkTolerance, setLinkTolerance] = useState(DEFAULT_LINK_TOLERANCE);
     // Word Syllables Stress Check: the multi-syllable words to check (blank = no stress check),
     // and how much of the reference's stressed/unstressed contrast the student must reach.
-    const [stressWords, setStressWords] = useState("");
+    // One field per stress word; sent to the analyzer as "accept, apology".
+    const [stressWordList, setStressWordList] = useState<string[]>([""]);
+    const stressWords = stressWordList.map((w) => w.trim()).filter(Boolean).join(", ");
     const [stressContrastRatio, setStressContrastRatio] = useState(DEFAULT_STRESS_CONTRAST_RATIO);
     // How closely each stress word's melody (pitch shape) must follow the reference's. Higher = stricter.
     const [melodyMinSimilarity, setMelodyMinSimilarity] = useState(DEFAULT_MELODY_MIN_SIMILARITY);
     // Which syllable of each stress word should be stressed: the CMU dictionary's (the reference
     // audio as fallback, e.g. at the end of a Yes/No question) or the reference audio's.
     const [stressSource, setStressSource] = useState<StressSource>(DEFAULT_STRESS_SOURCE);
+    // "Analyze reference audio" next to each stress word: what VoiceAnalyzer measures in the
+    // reference alone, per word (lower-cased). Kept with the reference it was made from, and only
+    // shown while that reference is the current one.
+    const [refAnalyses, setRefAnalyses] = useState<Record<string, {
+        refUrl: string; loading: boolean; result?: ReferenceWordAnalysis; error?: string;
+    }>>({});
     // The scoring options' help (opened with the Help button next to the stress options).
     const [showHelp, setShowHelp] = useState(false);
 
@@ -213,6 +300,28 @@ export default function Shadowing() {
     // The reference must say the sentence (and SSML, if it was made from one) that's typed now.
     // Stress words are required to send or score (the Word Syllables Stress Check always runs).
     const stressWordsMissing = stressWords.trim() === "";
+    // The reference sentence's words, each once ("I'm", "well-known" kept whole), as pick buttons.
+    const sentenceWords = Array.from(
+        new Map(
+            (text.match(/[A-Za-z0-9]+(?:['’-][A-Za-z0-9]+)*/g) ?? []).map((w) => [w.toLowerCase(), w] as const),
+        ).values(),
+    );
+    const sameWord = (a: string, b: string) => a.trim().toLowerCase() === b.toLowerCase();
+    const isStressWord = (word: string) => stressWordList.some((w) => sameWord(w, word));
+    // Never leaves the list without a field to type in.
+    const setStressFields = (list: string[]) => setStressWordList(list.length > 0 ? list : [""]);
+    // A word button puts the word in the first empty field (or a new one), or takes its field out
+    // if it's already there.
+    const toggleStressWord = (word: string) => {
+        if (isStressWord(word)) {
+            setStressFields(stressWordList.filter((w) => !sameWord(w, word)));
+            return;
+        }
+        const blank = stressWordList.findIndex((w) => w.trim() === "");
+        setStressFields(blank >= 0
+            ? stressWordList.map((w, i) => (i === blank ? word : w))
+            : [...stressWordList, word]);
+    };
     const referenceReady = reference !== null && reference.sentence === text
         && (reference.source === "s3" || reference.ssml === "" || reference.ssml === ssml.trim());
     // The SSML helper buttons work on what's in the SSML box (or the sentence if it's empty), so
@@ -333,6 +442,32 @@ export default function Shadowing() {
         }
     };
 
+    // Sends the reference and one stress word to VoiceAnalyzer (through Django) and keeps what it
+    // measures in the reference alone: the stressed syllable, the dictionary's, and the melody.
+    const analyzeReference = async (word: string) => {
+        const key = word.trim().toLowerCase();
+        if (!key || !reference || !referenceReady || refAnalyses[key]?.loading) return;
+        const refUrl = reference.url;
+        setRefAnalyses((all) => ({ ...all, [key]: { refUrl, loading: true } }));
+        try {
+            const form = new FormData();
+            form.append("reference_file", reference.blob, "reference.mp3");
+            form.append("sentence", reference.sentence);
+            form.append("stress_words", word.trim());
+            form.append("stress_source", stressSource);
+            const res = await api.post("/api/shadowing/analyze_reference/", form);
+            const data = res.data as ReferenceAnalysis;
+            const result = data.words.find((w) => sameWord(w.word, word)) ?? data.words[0];
+            setRefAnalyses((all) => ({ ...all, [key]: { refUrl, loading: false, result } }));
+        } catch (err) {
+            console.error("Shadowing: analyzing the reference failed:", err);
+            const message = (err as { response?: { data?: { error?: string } } }).response?.data?.error;
+            setRefAnalyses((all) => ({
+                ...all, [key]: { refUrl, loading: false, error: message ?? "Analyzing the reference audio failed." },
+            }));
+        }
+    };
+
     // The scoring options as form fields (sent with the exercise, or with a test).
     const appendOptions = (form: FormData) => {
         const strict = strictConnectedSpeech || targetedWords.trim() !== "";
@@ -433,6 +568,16 @@ export default function Shadowing() {
             appendOptions(form);
             const res = await api.post("/api/shadowing/save_sentence/", form);
             setSavedSentence({ url: reference.url, keywords: res.data.keywords as string[] });
+            const s3Key = (res.data.s3_key as string | undefined) ?? "";
+            const prefix = s3Key.slice(0, s3Key.lastIndexOf("/") + 1);
+            toast.success(
+                <div className="flex flex-col gap-1 text-sm">
+                    <span>Audio saved to S3 prefix:</span>
+                    <code className="break-all">{prefix || "audios/shadowing_sentences/"}</code>
+                    <span>The sentence, keywords, voice and scoring options were saved to the database.</span>
+                </div>,
+                { autoClose: 8000 },
+            );
         } catch (err) {
             console.error("Shadowing: saving the sentence failed:", err);
             const message = (err as { response?: { data?: { error?: string } } }).response?.data?.error;
@@ -467,15 +612,6 @@ export default function Shadowing() {
     return (
         <div className="mt-10 bg-gray-200 p-3 rounded-md flex flex-col gap-3">
             <h3 className="text-lg font-bold">Shadowing</h3>
-            <label className="flex flex-col gap-1">
-                Reference sentence
-                <input
-                    value={sentence}
-                    onChange={(e) => setSentence(e.target.value)}
-                    placeholder="e.g. I think this is a very good idea."
-                    className="bg-white border border-gray-400 rounded-md p-2"
-                />
-            </label>
             {/* Reference Audio: a sentence saved in S3, or a new one made with a TTS provider. */}
             <fieldset className="flex flex-col gap-3 rounded-md border border-gray-400 p-3">
                 <legend className="px-1 text-sm font-semibold">Reference Audio</legend>
@@ -486,7 +622,7 @@ export default function Shadowing() {
                         onChange={(e) => changeAudioSource(e.target.value as "s3" | "tts")}
                         className="bg-white border border-gray-400 rounded-md p-2"
                     >
-                        <option value="s3">From S3 Storage</option>
+                        <option value="s3">From Database (pointing to S3 storage)</option>
                         <option value="tts">Generate from a TTS Provider</option>
                     </select>
                 </label>
@@ -509,7 +645,7 @@ export default function Shadowing() {
                                 disabled={searching}
                                 className="text-white bg-blue-600 p-2 rounded-md hover:bg-blue-800 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
-                                {searching ? "Searching…" : "Search"}
+                                {searching ? "Searching…" : "Search Database"}
                             </button>
                         </form>
                         <p className="text-xs text-gray-600">
@@ -542,14 +678,16 @@ export default function Shadowing() {
                                                     className="mt-1"
                                                 />
                                                 <span className="flex flex-col">
-                                                    <span className="font-medium">{saved.sentence}</span>
+                                                    <span className="flex flex-wrap items-center gap-2">
+                                                        <span className="font-medium">{saved.sentence}</span>
+                                                        <PlayButton src={saved.audio_url} label={saved.sentence} />
+                                                    </span>
                                                     <span className="text-xs text-gray-600">
                                                         {details}
                                                         {loadingSavedId === saved.id && " · Loading…"}
                                                     </span>
                                                 </span>
                                             </label>
-                                            <audio src={saved.audio_url} controls preload="none" className="mt-1 w-full" />
                                         </li>
                                     );
                                 })}
@@ -564,6 +702,16 @@ export default function Shadowing() {
                     </div>
                 ) : (
                     <>
+                    {/* The sentence is typed only for a new TTS reference; a saved one brings its own. */}
+                    <label className="flex flex-col gap-1">
+                        Reference sentence
+                        <input
+                            value={sentence}
+                            onChange={(e) => setSentence(e.target.value)}
+                            placeholder="e.g. I think this is a very good idea."
+                            className="bg-white border border-gray-400 rounded-md p-2"
+                        />
+                    </label>
                     {SSML_PROVIDERS.includes(provider) && (
                         <div className="flex flex-col gap-1">
                             <div className="flex flex-wrap items-center gap-2">
@@ -700,7 +848,7 @@ export default function Shadowing() {
                         >
                             {generating ? "Generating…" : reference ? "Generate again" : "Generate reference"}
                         </button>
-                        {reference && <audio key={reference.url} src={reference.url} controls className="min-w-0 flex-1" />}
+                        {reference && <PlayButton key={reference.url} src={reference.url} label="reference audio" showTime />}
                     </div>
                     {!text && <p className="text-sm text-gray-600">Type the sentence above first.</p>}
                     {reference && text && !referenceReady && (
@@ -726,7 +874,7 @@ export default function Shadowing() {
                                     }`}
                                     title="Keep this reference audio to find and reuse later"
                                 >
-                                    {savingSentence ? "Saving…" : savedSentence?.url === reference.url ? "Sentence saved" : "Save Sentence to S3"}
+                                    {savingSentence ? "Saving…" : savedSentence?.url === reference.url ? "Sentence saved" : "Save Sentence"}
                                 </button>
                             </div>
                             <p className="text-xs text-gray-600">
@@ -746,7 +894,7 @@ export default function Shadowing() {
                 )}
             </fieldset>
 
-            {/* Scoring options, then send the reference to the students */}
+            {/* Scoring options (used by Send to Students and Test it yourself) */}
             <fieldset className="flex flex-col gap-3 rounded-md border border-gray-400 p-3">
                 <legend className="px-1 text-sm font-semibold">Scoring options</legend>
                 <div className="flex flex-wrap items-end gap-4">
@@ -804,23 +952,90 @@ export default function Shadowing() {
                         a word that isn't in the dictionary, or a word with two stress patterns (record, present).
                     </p>
                 )}
+                {sentenceWords.length > 0 && (
+                    <div className="flex flex-col gap-1">
+                        <span className="text-sm text-gray-700">Click the words to stress-check (click again to remove):</span>
+                        <div className="flex flex-wrap gap-1.5">
+                            {sentenceWords.map((word) => {
+                                const on = isStressWord(word);
+                                return (
+                                    <button
+                                        key={word.toLowerCase()}
+                                        type="button"
+                                        onClick={() => toggleStressWord(word)}
+                                        aria-pressed={on}
+                                        className={`rounded-md border px-2 py-1 text-sm ${
+                                            on
+                                                ? "border-blue-700 bg-blue-600 text-white hover:bg-blue-800"
+                                                : "border-gray-400 bg-white text-gray-900 hover:bg-gray-100"
+                                        }`}
+                                    >
+                                        {word}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
+                )}
                 <div className="flex flex-wrap items-end gap-4">
                     {/* Word Syllables Stress Check: which syllable is stressed inside each word given here. */}
-                    <label className="flex flex-col gap-1">
-                        <span className="text-sm">
+                    <fieldset className="flex flex-col gap-1">
+                        <legend className="mb-1 text-sm">
                             Stress words <span className="text-red-700">(required)</span>{" "}
                             <span className="text-gray-600">The multi-syllable words checked for syllable stress pattern.</span>
-                        </span>
-                        <input
-                            value={stressWords}
-                            onChange={(e) => setStressWords(e.target.value)}
-                            placeholder="e.g. accept, apology"
-                            title="Multi-syllable words whose syllable stress is checked against the reference (Word Syllables Stress Check)."
-                            required
-                            aria-required="true"
-                            className={`bg-white border rounded-md p-2 w-56 ${stressWordsMissing ? "border-red-600" : "border-gray-400"}`}
-                        />
-                    </label>
+                        </legend>
+                        {stressWordList.map((word, i) => {
+                            const analysis = refAnalyses[word.trim().toLowerCase()];
+                            const shown = analysis && reference && analysis.refUrl === reference.url ? analysis : null;
+                            return (
+                            <div key={i} className="flex flex-col gap-1">
+                            <div className="flex items-center gap-1">
+                                <input
+                                    value={word}
+                                    onChange={(e) => setStressWordList(stressWordList.map((w, j) => (j === i ? e.target.value : w)))}
+                                    placeholder={i === 0 ? "e.g. apology" : "another word"}
+                                    aria-label={`Stress word ${i + 1}`}
+                                    title="A multi-syllable word whose syllable stress is checked against the reference (Word Syllables Stress Check)."
+                                    required={i === 0}
+                                    aria-required={i === 0}
+                                    className={`bg-white border rounded-md p-2 w-56 ${stressWordsMissing ? "border-red-600" : "border-gray-400"}`}
+                                />
+                                {(stressWordList.length > 1 || word !== "") && (
+                                    <button
+                                        type="button"
+                                        onClick={() => setStressFields(stressWordList.filter((_, j) => j !== i))}
+                                        aria-label={`Remove stress word ${i + 1}`}
+                                        title="Remove"
+                                        className="h-8 w-8 rounded-md text-lg leading-none text-gray-600 hover:bg-gray-300 hover:text-gray-900"
+                                    >
+                                        ×
+                                    </button>
+                                )}
+                                <button
+                                    type="button"
+                                    onClick={() => void analyzeReference(word)}
+                                    disabled={!word.trim() || !reference || !referenceReady || shown?.loading}
+                                    title={!reference || !referenceReady
+                                        ? "Generate (or load) the reference audio for this sentence first"
+                                        : "Measure this word's stressed syllable and melody in the reference audio"}
+                                    className="rounded-md border border-gray-400 bg-white px-2 py-1 text-sm hover:bg-gray-100 disabled:opacity-50"
+                                >
+                                    {shown?.loading ? "Analyzing…" : "Analyze reference audio"}
+                                </button>
+                            </div>
+                            {shown?.result && <ReferenceAnalysisView analysis={shown.result} />}
+                            {shown?.error && <p className="text-sm text-red-700">{shown.error}</p>}
+                            </div>
+                            );
+                        })}
+                        <button
+                            type="button"
+                            onClick={() => setStressWordList([...stressWordList, ""])}
+                            className="self-start text-sm text-blue-700 hover:underline"
+                        >
+                            + Add a word
+                        </button>
+                    </fieldset>
                     {stressWords.trim() !== "" && (
                         <RatioSlider
                             label="Stress contrast"
@@ -883,6 +1098,11 @@ export default function Shadowing() {
                     </button>
                 </div>
                 {showHelp && <ScoringHelp onClose={() => setShowHelp(false)} />}
+            </fieldset>
+
+            {/* Send the reference, with the scoring options above, to the students. */}
+            <fieldset className="flex flex-col gap-3 rounded-md border border-gray-400 p-3">
+                <legend className="px-1 text-sm font-semibold">Send to Students</legend>
                 <div className="flex flex-wrap items-center gap-3">
                     <button
                         onClick={() => void sendToStudents()}
@@ -896,6 +1116,10 @@ export default function Shadowing() {
                     {stressWordsMissing && <span className="text-sm text-red-700">Type the stress words first.</span>}
                     {!referenceReady && <span className="text-sm text-gray-600">Choose or generate the reference first.</span>}
                 </div>
+                <p className="text-xs text-[#5C3A1E]">
+                    Reference audio will be sent to S3 directory: <code>/audios/shadowing</code> for students to pick up
+                    (via Redis signal). Files will be auto-deleted after 2 days according to rule set in S3.
+                </p>
             </fieldset>
 
             {/* The teacher records the sentence and is scored against the reference with the
