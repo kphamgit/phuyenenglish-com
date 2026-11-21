@@ -113,8 +113,9 @@ function WordStressTable({ words, teacher = false }: { words: WordStress[]; teac
             // Teacher: when the dictionary decided and the reference voice stressed another syllable.
             const refDiffers =
               teacher && source === 'dictionary' && w.reference_stressed_syllable != null && w.reference_stressed_syllable !== expected;
-            // The melody row only when at least two syllables were compared (one syllable has no melody to follow).
-            const melody = (w.pitch_direction?.contour_syllables?.length ?? 0) >= 2 ? w.pitch_direction : undefined;
+            // The melody row when at least one syllable has a pitch curve (a word whose last syllable
+            // trails off into creak or whisper still shows the fall within its stressed syllable).
+            const melody = (w.pitch_direction?.contour_syllables?.length ?? 0) >= 1 ? w.pitch_direction : undefined;
             const rowCell = melody ? cell.replace('border-b border-gray-200', '') : cell;
             return (
               <Fragment key={i}>
@@ -181,6 +182,37 @@ function WordStressTable({ words, teacher = false }: { words: WordStress[]; teac
   );
 }
 
+// The student's screen: only the melody of each stress word (the badge and both pitch curves, no
+// advice text), without the stress check (stressed syllable, contrast, score), which the teacher sees.
+function WordMelodyList({ words }: { words: WordStress[] }) {
+  const shown = words.filter((w) => w.word_index != null && (w.syllable_count ?? 0) >= 2);
+  if (shown.length === 0) return null;
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="font-semibold text-gray-700">
+        Melody{' '}
+        <span className="font-normal text-xs text-gray-500">
+          (reference: grey dashed line · yours: blue line)
+        </span>
+      </div>
+      {shown.map((w, i) => {
+        const melody = (w.pitch_direction?.contour_syllables?.length ?? 0) >= 1 ? w.pitch_direction : undefined;
+        const parts = fitParts(w.hyphenated, w.expected_pattern ?? w.reference_pattern);
+        return (
+          <div key={i} className="flex flex-col gap-1 border-b border-gray-200 pb-2">
+            <span className="font-semibold">{w.word}</span>
+            {melody ? (
+              <PitchDirectionCell d={melody} parts={parts} advice={false} />
+            ) : (
+              <span className="text-xs text-gray-600">{w.pitch_direction?.message || w.message || 'The melody could not be measured.'}</span>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // The dictionary's syllables, used only when there's one per circle of the pattern.
 function fitParts(parts: string[] | null | undefined, pattern: string | null | undefined): string[] | null {
   const n = (pattern ?? '').trim().split(/\s+/).filter(Boolean).length;
@@ -188,7 +220,7 @@ function fitParts(parts: string[] | null | undefined, pattern: string | null | u
 }
 
 // The word as spelled syllables, e.g. bas-ket-ball, with the stressed one in bold.
-function Spelled({ parts, stressed }: { parts: string[]; stressed: number | null | undefined }) {
+export function Spelled({ parts, stressed }: { parts: string[]; stressed: number | null | undefined }) {
   return (
     <div className="text-xs text-gray-700">
       {parts.map((p, i) => (
@@ -203,7 +235,7 @@ function Spelled({ parts, stressed }: { parts: string[]; stressed: number | null
 
 // A stress pattern such as "○ ● ○" as numbered circles: the stressed syllable filled, in green
 // (matches the reference) or amber (doesn't).
-function StressPattern({ pattern, tone }: { pattern?: string | null; tone: 'green' | 'amber' }) {
+export function StressPattern({ pattern, tone }: { pattern?: string | null; tone: 'green' | 'amber' }) {
   const marks = (pattern ?? '').trim().split(/\s+/).filter(Boolean);
   if (marks.length === 0) return <span>–</span>;
   return (
@@ -314,8 +346,17 @@ function MelodyCoaching({ d, parts }: { d: PitchDirection; parts: string[] | nul
 }
 
 // The melody of one stress word: its badge, both pitch curves drawn together (reference grey,
-// yours blue, syllables separated), the syllables left out and why, and the advice.
-function PitchDirectionCell({ d, parts = null }: { d: PitchDirection; parts?: string[] | null }) {
+// yours blue, syllables separated), the syllables left out and why, and the advice
+// (advice=false: the curves without the advice, as on the student's screen).
+function PitchDirectionCell({
+  d,
+  parts = null,
+  advice = true,
+}: {
+  d: PitchDirection;
+  parts?: string[] | null;
+  advice?: boolean;
+}) {
   const tone =
     d.status === 'match'
       ? 'bg-green-100 text-green-800'
@@ -332,10 +373,12 @@ function PitchDirectionCell({ d, parts = null }: { d: PitchDirection; parts?: st
         </span>
         {d.reference_contour && d.recorded_contour && d.reference_contour.length > 1 && (
           <ContourChart
-            reference={d.reference_contour}
-            recorded={d.recorded_contour}
+            // Every syllable (gaps where there's no pitch) when the analyzer sends it; older
+            // results have only the measured syllables.
+            reference={d.full_reference_contour?.length ? d.full_reference_contour : d.reference_contour}
+            recorded={d.full_recorded_contour?.length ? d.full_recorded_contour : d.recorded_contour}
             perSyllable={d.points_per_syllable ?? 10}
-            syllables={d.contour_syllables ?? []}
+            syllables={(d.full_reference_contour?.length ? d.full_contour_syllables : d.contour_syllables) ?? []}
             parts={parts}
           />
         )}
@@ -345,9 +388,11 @@ function PitchDirectionCell({ d, parts = null }: { d: PitchDirection; parts?: st
           </span>
         ))}
       </div>
-      <div className="min-w-48 flex-1">
-        {d.status !== 'not_judged' ? <MelodyCoaching d={d} parts={parts} /> : <span className="text-xs text-gray-600">{d.message}</span>}
-      </div>
+      {advice && (
+        <div className="min-w-48 flex-1">
+          {d.status !== 'not_judged' ? <MelodyCoaching d={d} parts={parts} /> : <span className="text-xs text-gray-600">{d.message}</span>}
+        </div>
+      )}
     </div>
   );
 }
@@ -355,6 +400,8 @@ function PitchDirectionCell({ d, parts = null }: { d: PitchDirection; parts?: st
 // Two pitch curves (semitones) on one small chart: reference dashed grey, yours solid blue,
 // with a light line between syllables and each syllable underneath (its spelling, or its number).
 // Without `recorded` it draws the reference alone (the teacher's "Analyze reference audio").
+// null points = no reliable pitch there: the curve has a gap, and a syllable whose reference has
+// no pitch at all keeps its place, its label greyed with "no pitch" in it.
 export function ContourChart({
   reference,
   recorded,
@@ -362,8 +409,8 @@ export function ContourChart({
   syllables,
   parts = null,
 }: {
-  reference: number[];
-  recorded?: number[];
+  reference: (number | null)[];
+  recorded?: (number | null)[];
   perSyllable: number;
   syllables: number[];
   parts?: string[] | null; // the syllables as spelled; labels the chart instead of the numbers
@@ -371,14 +418,27 @@ export function ContourChart({
   const W = 180;
   const H = 64;
   const pad = 4;
-  const all = [...reference, ...(recorded ?? [])];
-  const lo = Math.min(...all);
-  const hi = Math.max(...all);
+  const all = [...reference, ...(recorded ?? [])].filter((v): v is number => v != null);
+  const lo = all.length ? Math.min(...all) : 0;
+  const hi = all.length ? Math.max(...all) : 1;
   const span = Math.max(hi - lo, 1);
   const n = Math.max(reference.length, recorded?.length ?? 0);
   const x = (i: number) => pad + (i / Math.max(n - 1, 1)) * (W - 2 * pad);
   const y = (v: number) => pad + (1 - (v - lo) / span) * (H - 2 * pad - 10);
-  const path = (vals: number[]) => vals.map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+  // One path, lifted over the gaps (null points).
+  const path = (vals: (number | null)[]) => {
+    let d = '';
+    let pen = false;
+    vals.forEach((v, i) => {
+      if (v == null) {
+        pen = false;
+        return;
+      }
+      d += `${pen ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)} `;
+      pen = true;
+    });
+    return d.trim();
+  };
   return (
     <svg
       width={W}
@@ -390,10 +450,23 @@ export function ContourChart({
       {syllables.map((num, k) => {
         const x0 = x(k * perSyllable);
         const x1 = x(Math.min((k + 1) * perSyllable, n) - 1);
+        const noPitch = reference.slice(k * perSyllable, (k + 1) * perSyllable).every((v) => v == null);
         return (
           <g key={k}>
             {k > 0 && <line x1={x0} x2={x0} y1={pad} y2={H - 12} stroke="#e5e7eb" />}
-            <text x={(x0 + x1) / 2} y={H - 2} fontSize="10" fontWeight="600" textAnchor="middle" fill="#1f2937">
+            {noPitch && (
+              <text x={(x0 + x1) / 2} y={(H - 12) / 2 + 3} fontSize="8" textAnchor="middle" fill="#9ca3af" fontStyle="italic">
+                no pitch
+              </text>
+            )}
+            <text
+              x={(x0 + x1) / 2}
+              y={H - 2}
+              fontSize="10"
+              fontWeight="600"
+              textAnchor="middle"
+              fill={noPitch ? '#9ca3af' : '#1f2937'}
+            >
               {parts?.[num - 1] ?? num}
             </text>
           </g>
@@ -409,7 +482,7 @@ export function ContourChart({
 // compared item by item (the whole sentence, then each word), and the full reply.
 // teacher: the teacher's view (Test it yourself, the students' results), with teacher-only wording.
 // student: the student's screen, only the whole-sentence table (words, without the ARPAbet / IPA
-// sounds) and the Word Syllables Stress Check.
+// sounds) and the melody of each stress word (WordMelodyList); the stress check is teacher-only.
 export function EvaluationView({
   result: r,
   teacher = false,
@@ -537,7 +610,7 @@ export function EvaluationView({
     return (
       <div className="flex flex-col gap-3">
         {sentenceTable}
-        {ws && <WordStressTable words={ws.words} />}
+        {ws && <WordMelodyList words={ws.words} />}
       </div>
     );
   }

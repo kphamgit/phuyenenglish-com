@@ -18,6 +18,7 @@ import { EvaluationView } from "./shadowing/EvaluationView";
 import { ReferenceAnalysisView, type ReferenceAnalysis, type ReferenceWordAnalysis } from "./shadowing/ReferenceAnalysisView";
 import ShadowingResults from "./shadowing/ShadowingResults";
 import { useRecorder } from "./shadowing/useRecorder";
+import { toWav16kMono, wavFileName } from "./shared/wav";
 
 // Teacher-only "Shadowing": generate a reference recording of a sentence with ElevenLabs
 // (/api/eleven_lab_tts/), Google TTS (/english/google_tts/) or Amazon Polly, replay it, and keep
@@ -553,6 +554,49 @@ export default function Shadowing() {
 
     // Keeps this reference sentence and its audio, searchable by its words and the keywords
     // (audio in S3 under audios/shadowing_sentences/, details in the database).
+    // Downloads the reference as a 16 kHz mono WAV (converted in the browser), named after its sentence.
+    const [convertingWav, setConvertingWav] = useState(false);
+    // Converts an audio blob to a 16 kHz mono WAV and hands it to the browser as a download.
+    const saveAsWav = async (blob: Blob, sentenceText: string) => {
+        const url = URL.createObjectURL(await toWav16kMono(blob));
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = wavFileName(sentenceText);
+        link.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+    };
+    const downloadWav = async () => {
+        if (!reference || convertingWav) return;
+        setConvertingWav(true);
+        setError(null);
+        try {
+            await saveAsWav(reference.blob, reference.sentence);
+        } catch (err) {
+            setError(`Converting to WAV failed: ${err instanceof Error ? err.message : String(err)}`);
+        } finally {
+            setConvertingWav(false);
+        }
+    };
+
+    // Downloads a saved sentence's audio (From Database / S3 list) as WAV, for testing later.
+    const [downloadingSavedId, setDownloadingSavedId] = useState<SavedSentence["id"] | null>(null);
+    const downloadSavedWav = async (saved: SavedSentence) => {
+        if (downloadingSavedId !== null) return;
+        setDownloadingSavedId(saved.id);
+        setSearchError(null);
+        try {
+            const blob = reference?.savedId === saved.id
+                ? reference.blob
+                : ((await api.get(`/api/shadowing/sentence_audio/${saved.id}/`, { responseType: "blob" })).data as Blob);
+            await saveAsWav(blob, saved.sentence);
+        } catch (err) {
+            console.error("Shadowing: downloading the saved audio as WAV failed:", err);
+            setSearchError("Downloading that audio as WAV failed.");
+        } finally {
+            setDownloadingSavedId(null);
+        }
+    };
+
     const saveSentence = async () => {
         if (!reference || !referenceReady || savingSentence) return;
         setSavingSentence(true);
@@ -681,6 +725,20 @@ export default function Shadowing() {
                                                     <span className="flex flex-wrap items-center gap-2">
                                                         <span className="font-medium">{saved.sentence}</span>
                                                         <PlayButton src={saved.audio_url} label={saved.sentence} />
+                                                        <button
+                                                            type="button"
+                                                            onClick={(e) => {
+                                                                // Keep the click from toggling the row's checkbox.
+                                                                e.preventDefault();
+                                                                e.stopPropagation();
+                                                                void downloadSavedWav(saved);
+                                                            }}
+                                                            disabled={downloadingSavedId !== null}
+                                                            className="text-xs text-gray-800 bg-gray-300 px-2 py-0.5 rounded-md hover:bg-gray-400 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                            title="Save this audio as a 16 kHz mono WAV"
+                                                        >
+                                                            {downloadingSavedId === saved.id ? "Converting…" : "Download"}
+                                                        </button>
                                                     </span>
                                                     <span className="text-xs text-gray-600">
                                                         {details}
@@ -849,6 +907,17 @@ export default function Shadowing() {
                             {generating ? "Generating…" : reference ? "Generate again" : "Generate reference"}
                         </button>
                         {reference && <PlayButton key={reference.url} src={reference.url} label="reference audio" showTime />}
+                        {reference && (
+                            <button
+                                type="button"
+                                onClick={() => void downloadWav()}
+                                disabled={convertingWav}
+                                className="text-gray-800 bg-gray-300 p-2 rounded-md hover:bg-gray-400 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                                title="Save this reference as a 16 kHz mono WAV"
+                            >
+                                {convertingWav ? "Converting…" : "Download WAV"}
+                            </button>
+                        )}
                     </div>
                     {!text && <p className="text-sm text-gray-600">Type the sentence above first.</p>}
                     {reference && text && !referenceReady && (
@@ -877,9 +946,11 @@ export default function Shadowing() {
                                     {savingSentence ? "Saving…" : savedSentence?.url === reference.url ? "Sentence saved" : "Save Sentence"}
                                 </button>
                             </div>
-                            <p className="text-xs text-gray-600">
+                            <p className="text-xs text-gray-900">
                                 Like this reference? Save it to find it later by any word of the sentence or by its keywords
-                                (separate keywords with commas). The audio, voice, speed and scoring options are kept.
+                                (separate keywords with commas). The audio file is stored in S3, in a new folder under{" "}
+                                <code>audios/shadowing_sentences/</code>. A database row keeps everything else: the
+                                sentence, keywords, voice, speed, scoring options and the S3 location of the audio.
                             </p>
                             {savedSentence?.url === reference.url && (
                                 <p className="text-sm text-green-800">

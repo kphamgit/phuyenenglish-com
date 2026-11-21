@@ -88,6 +88,11 @@ export interface PitchDirection {
   reference_contour?: number[]; // semitones, points_per_syllable points per kept syllable
   recorded_contour?: number[];
   contour_syllables?: number[]; // the syllable number of each block of points
+  // For the chart: every syllable in order, points_per_syllable points each, null where that side
+  // has no reliable pitch (display only; the score uses the fields above).
+  full_reference_contour?: (number | null)[];
+  full_recorded_contour?: (number | null)[];
+  full_contour_syllables?: number[];
   syllables: {
     syllable_index: number; // 1-based
     stressed?: boolean;

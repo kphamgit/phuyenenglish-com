@@ -135,8 +135,8 @@ export default function StudentShadowing({ hidden = false }: { hidden?: boolean 
     );
 }
 
-// The student's result: the whole sentence (reference vs. the recording) and the Word Syllables
-// Stress Check (EvaluationView's student mode).
+// The student's result: the whole sentence (reference vs. the recording) and the melody of each
+// stress word (EvaluationView's student mode; the stress check is shown to the teacher only).
 function StudentResult({ result: r }: { result: EvaluationResult }) {
     return (
         <div className="overflow-x-auto rounded-md border border-teal-300 bg-white p-4 text-sm">
