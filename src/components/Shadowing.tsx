@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import api from "../api";
 import { toast } from "react-toastify";
 import {
@@ -17,6 +17,7 @@ import {
 import { EvaluationView } from "./shadowing/EvaluationView";
 import { ReferenceAnalysisView, type ReferenceAnalysis, type ReferenceWordAnalysis } from "./shadowing/ReferenceAnalysisView";
 import ShadowingResults from "./shadowing/ShadowingResults";
+import { PlayButton } from "./shadowing/PlayButton";
 import { useRecorder } from "./shadowing/useRecorder";
 import { toWav16kMono, wavFileName } from "./shared/wav";
 
@@ -118,83 +119,6 @@ interface Reference {
 const DEFAULT_VOICE: Record<Provider, string> = {
     elevenlabs: "River", google: chirp3Id("Charon"), google_neural: neural2Id("D"), polly: "Matthew",
 };
-
-// 3.4 → "0:03"
-function formatTime(seconds: number): string {
-    const s = Math.floor(seconds);
-    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
-}
-
-// The audio that a PlayButton is playing now, so that starting another one stops it.
-let playingAudio: HTMLAudioElement | null = null;
-
-// A round play button (a triangle in a circle) in place of the browser's audio controls; it shows
-// a pause sign while playing, and a second click stops.
-// With showTime it also shows "elapsed / length" (no progress bar), and a second click pauses
-// rather than stops, so the next click carries on from there.
-function PlayButton({ src, label, showTime = false }: { src: string; label: string; showTime?: boolean }) {
-    const audioRef = useRef<HTMLAudioElement>(null);
-    const [playing, setPlaying] = useState(false);
-    const [elapsed, setElapsed] = useState(0);
-    const [length, setLength] = useState<number | null>(null);
-    const toggle = (e: React.MouseEvent) => {
-        e.preventDefault(); // the button sits inside the row's label: don't tick the checkbox
-        const audio = audioRef.current;
-        if (!audio) return;
-        if (!audio.paused) {
-            audio.pause();
-            return;
-        }
-        if (playingAudio && playingAudio !== audio) playingAudio.pause();
-        playingAudio = audio;
-        if (!showTime) audio.currentTime = 0;
-        void audio.play().catch((err) => console.error("Shadowing: can't play the saved audio:", err));
-    };
-    return (
-        <>
-            <button
-                type="button"
-                onClick={toggle}
-                aria-label={`${playing ? (showTime ? "Pause" : "Stop") : "Play"} “${label}”`}
-                title={playing ? (showTime ? "Pause" : "Stop") : "Play"}
-                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border-2 border-blue-600 text-blue-600 hover:bg-blue-50"
-            >
-                {playing ? (
-                    <svg viewBox="0 0 12 12" className="h-3 w-3" fill="currentColor" aria-hidden="true">
-                        <rect x="2" y="1.5" width="3" height="9" />
-                        <rect x="7" y="1.5" width="3" height="9" />
-                    </svg>
-                ) : (
-                    <svg viewBox="0 0 12 12" className="ml-0.5 h-3 w-3" fill="currentColor" aria-hidden="true">
-                        <path d="M2.5 1.2v9.6L10.5 6z" />
-                    </svg>
-                )}
-            </button>
-            {showTime && (
-                <span className="text-sm tabular-nums text-gray-700">
-                    {formatTime(elapsed)} / {length === null ? "–:––" : formatTime(length)}
-                </span>
-            )}
-            <audio
-                ref={audioRef}
-                src={src}
-                preload={showTime ? "metadata" : "none"}
-                onPlay={() => setPlaying(true)}
-                onPause={() => setPlaying(false)}
-                onEnded={() => setPlaying(false)}
-                onTimeUpdate={(e) => setElapsed(e.currentTarget.currentTime)}
-                onLoadedMetadata={(e) => {
-                    const d = e.currentTarget.duration;
-                    setLength(Number.isFinite(d) ? d : null);
-                }}
-                onDurationChange={(e) => {
-                    const d = e.currentTarget.duration;
-                    if (Number.isFinite(d)) setLength(d);
-                }}
-            />
-        </>
-    );
-}
 
 export default function Shadowing() {
     const [sentence, setSentence] = useState("");

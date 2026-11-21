@@ -481,16 +481,19 @@ export function ContourChart({
 // A VoiceAnalyzer_Claude reply, readable: the scores, then the reference and the recording
 // compared item by item (the whole sentence, then each word), and the full reply.
 // teacher: the teacher's view (Test it yourself, the students' results), with teacher-only wording.
+// hideOverall: leave out the overall score (the students' results, which show the melody score instead).
 // student: the student's screen, only the whole-sentence table (words, without the ARPAbet / IPA
 // sounds) and the melody of each stress word (WordMelodyList); the stress check is teacher-only.
 export function EvaluationView({
   result: r,
   teacher = false,
   student = false,
+  hideOverall = false,
 }: {
   result: EvaluationResult;
   teacher?: boolean;
   student?: boolean;
+  hideOverall?: boolean;
 }) {
   const s = r.summary;
   const words = r.stage4_pronunciation?.word_pronunciations ?? [];
@@ -618,9 +621,11 @@ export function EvaluationView({
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap gap-x-5 gap-y-1">
-        <span>
-          Overall: <strong className="text-base text-gray-900">{pct(s.overall_score_pct)}</strong>
-        </span>
+        {!hideOverall && (
+          <span>
+            Overall: <strong className="text-base text-gray-900">{pct(s.overall_score_pct)}</strong>
+          </span>
+        )}
         <span>Pronunciation: {pct(s.pronunciation_score_pct)}</span>
         {ws && <span>Word stress: {pct(s.stress_match_pct)}</span>}
         {ws && ws.pitch_direction_score_pct != null && <span>Melody: {pct(ws.pitch_direction_score_pct)}</span>}

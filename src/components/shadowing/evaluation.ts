@@ -109,6 +109,7 @@ export interface PitchDirection {
 // Word Syllables Stress Check: one checked word (see the service's evaluate_word_syllable_stress).
 export interface WordStress {
   word: string;
+  word_index?: number | null; // position in the sentence; null when the word isn't in it
   syllable_count?: number;
   // The syllable the student should stress (1-based) and its pattern, and where that came from:
   // "dictionary" (CMU) or "reference" (the reference audio; in dictionary mode, see the reason).
@@ -188,6 +189,7 @@ export interface ShadowingResult {
   user_name: string;
   shadowing_id: string;
   attempt: number; // 1 for the first try, then counts up
+  take_id?: number | null; // the saved take (students_shadowing), to play the recording; missing on older results
   at: string; // ISO time
   evaluation: EvaluationResult;
 }

@@ -3,6 +3,7 @@ import api from "../../api";
 import { useWebSocket } from "../context/WebSocketContext";
 import type { WebSocketMessageProps } from "../shared/types";
 import { EvaluationView } from "./EvaluationView";
+import { PlayButton } from "./PlayButton";
 import { RISING_TONE_ENABLED, type ShadowingResult } from "./evaluation";
 
 // Teacher-only: each student's latest score for the current shadowing exercise. Loads the latest
@@ -28,6 +29,13 @@ interface Exercise {
 }
 
 const pct = (n: number | null | undefined) => (n == null ? "–" : `${n}%`);
+
+// A student's recorded take, fetched through Django with the teacher's login (it's in S3,
+// students_shadowing), as a URL the player can use.
+async function loadRecording(takeId: number): Promise<string> {
+    const res = await api.get(`/api/shadowing/take_recording/${takeId}/`, { responseType: "blob" });
+    return URL.createObjectURL(res.data as Blob);
+}
 
 // `shadowingId`: the exercise just sent from this page; a new one reloads the list.
 export default function ShadowingResults({ shadowingId }: { shadowingId?: string }) {
@@ -70,7 +78,7 @@ export default function ShadowingResults({ shadowingId }: { shadowingId?: string
     const linking = !exercise || exercise.options.strict_connected_speech || exercise.options.targeted_words.trim() !== "";
     // Word stress is only checked (and shown) when the exercise has stress words.
     const wordStress = !exercise || (exercise.options.stress_words ?? "").trim() !== "";
-    const columns = 6 + (wordStress ? 1 : 0) + (RISING_TONE_ENABLED ? 1 : 0) + (linking ? 1 : 0);
+    const columns = 6 + (wordStress ? 2 : 0) + (RISING_TONE_ENABLED ? 1 : 0) + (linking ? 1 : 0);
 
     return (
         <div className="flex flex-col gap-2 bg-white rounded-md p-3 border border-gray-300">
@@ -93,7 +101,8 @@ export default function ShadowingResults({ shadowingId }: { shadowingId?: string
                             <thead>
                                 <tr className="text-gray-500">
                                     <th className={cell}>Student</th>
-                                    <th className={cell}>Overall</th>
+                                    <th className={cell}>Recording</th>
+                                    {wordStress && <th className={cell}>Melody</th>}
                                     <th className={cell}>Pronunciation</th>
                                     {wordStress && <th className={cell}>Word stress</th>}
                                     {RISING_TONE_ENABLED && <th className={cell}>Intonation</th>}
@@ -111,7 +120,26 @@ export default function ShadowingResults({ shadowingId }: { shadowingId?: string
                                         <Fragment key={r.user_name}>
                                             <tr>
                                                 <td className={`${cell} font-semibold`}>{r.user_name}</td>
-                                                <td className={`${cell} font-bold`}>{pct(s.overall_score_pct)}</td>
+                                                <td className={cell}>
+                                                    {r.take_id ? (
+                                                        <div className="flex items-center gap-2">
+                                                            {/* key: a new attempt gets a fresh player */}
+                                                            <PlayButton
+                                                                key={r.take_id}
+                                                                label={`${r.user_name}'s recording, attempt ${r.attempt}`}
+                                                                load={() => loadRecording(r.take_id!)}
+                                                                showTime
+                                                            />
+                                                        </div>
+                                                    ) : (
+                                                        <span className="text-gray-400" title="Not kept (sent before recordings were saved, or the upload failed)">–</span>
+                                                    )}
+                                                </td>
+                                                {wordStress && (
+                                                    <td className={`${cell} font-bold`}>
+                                                        {pct(r.evaluation.word_stress_check?.pitch_direction_score_pct)}
+                                                    </td>
+                                                )}
                                                 <td className={cell}>{pct(s.pronunciation_score_pct)}</td>
                                                 {wordStress && <td className={cell}>{pct(s.stress_match_pct)}</td>}
                                                 {RISING_TONE_ENABLED && <td className={cell}>{pct(s.intonation_score_pct)}</td>}
@@ -130,7 +158,7 @@ export default function ShadowingResults({ shadowingId }: { shadowingId?: string
                                             {open && (
                                                 <tr>
                                                     <td colSpan={columns} className="p-2 bg-gray-50">
-                                                        <EvaluationView result={r.evaluation} teacher />
+                                                        <EvaluationView result={r.evaluation} teacher hideOverall />
                                                     </td>
                                                 </tr>
                                             )}
