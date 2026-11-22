@@ -23,7 +23,8 @@ import { toWav16kMono, wavFileName } from "./shared/wav";
 
 // Teacher-only "Shadowing": generate a reference recording of a sentence with ElevenLabs
 // (/api/eleven_lab_tts/), Google TTS (/english/google_tts/) or Amazon Polly, replay it, and keep
-// it with "Save Sentence" (/api/shadowing/save_sentence/). Adapted from the reference part
+// it with "Save Sentence" (/api/shadowing/save_sentence/: a kept audio in the library, see
+// english/audio.py in Django), or pick a kept one from the audio library (/english/audios/). Adapted from the reference part
 // of the VoiceAnalyzer1 tab in p2p-voice-chat-admin (VoiceAnalyzerPanel.tsx).
 // "Send to Students" (/api/shadowing/send/) shares the reference with the scoring options set
 // here; each student records themselves repeating it and VoiceAnalyzer_Claude scores them.
@@ -103,12 +104,28 @@ const CHIRP3_VOICES: { name: string; gender: "female" | "male" }[] = [
     { name: "Zephyr", gender: "female" }, { name: "Zubenelgenubi", gender: "male" },
 ];
 const chirp3Id = (name: string) => `en-US-Chirp3-HD-${name}`;
-// A reference sentence saved with "Save Sentence" (/api/shadowing/sentences/).
+// A kept audio in the audio library (/english/audios/): a sentence saved here with "Save Sentence"
+// (made_for "shadowing"), or one saved from a question form (made_for "question").
 interface SavedSentence {
-    id: number; sentence: string; tts_text: string; keywords: string[]; voice: string;
-    tts: { provider: string | null; voice: string | null; speed: number | null; ssml_rate: string | null };
-    created_by: string | null; created_at: string; audio_url: string;
+    id: number; text: string; tts_text: string; keywords: string[];
+    provider: string; voice: string; speed: number | null; made_for: "question" | "shadowing";
+    created_by: string | null; created_at: string; url: string;
 }
+// The SSML's <prosody rate="slow">, if it was made from SSML with one.
+const ssmlRateOf = (saved: SavedSentence) => saved.tts_text.match(/rate="([^"]+)"/)?.[1] ?? null;
+// The panel's Provider for a library audio (Audio keeps "google" for both Google voice kinds).
+const providerOf = (saved: SavedSentence): Provider =>
+    saved.provider === "google" ? (saved.voice.includes("Chirp3") ? "google" : "google_neural")
+    : saved.provider === "polly" ? "polly" : "elevenlabs";
+// How it was made, as the reference's TtsInfo (sent with it) and its label (as generateReference makes it).
+const savedTts = (saved: SavedSentence): TtsInfo => ({
+    provider: PROVIDER_NAME[providerOf(saved)], voice: saved.voice, speed: saved.speed, ssmlRate: ssmlRateOf(saved),
+});
+const savedLabel = (saved: SavedSentence) => {
+    const rate = ssmlRateOf(saved);
+    const speed = rate ? ` · SSML rate ${rate}` : `${saved.tts_text ? " · SSML" : ""} · ${saved.speed ?? 1}×`;
+    return `${PROVIDER_TAG[providerOf(saved)]} ${saved.voice.replace(/^en-US-(Chirp3-HD-)?/, "")}${speed}`;
+};
 // The reference in use: generated now ("tts") or a saved sentence from S3 ("s3", savedId = its id).
 // `ssml`: the SSML it was generated from ("" if none, and always "" for a saved one).
 interface Reference {
@@ -207,7 +224,7 @@ export default function Shadowing() {
     } | null>(null);
     const [savingTest, setSavingTest] = useState(false);
     const [savedFolder, setSavedFolder] = useState<string | null>(null);
-    // "Save sentence": keep a reference you like (S3 audio + searchable row, /api/shadowing/save_sentence/).
+    // "Save sentence": keep a reference you like in the audio library (/api/shadowing/save_sentence/).
     // savedSentence remembers which reference (by its object URL) was saved, so it isn't saved twice.
     const [sentenceKeywords, setSentenceKeywords] = useState("");
     const [savingSentence, setSavingSentence] = useState(false);
@@ -313,13 +330,14 @@ export default function Shadowing() {
         if (next === "s3" && searchResults === null) void searchSaved();
     };
 
-    // Saved sentences whose words or keywords contain every word of the search (blank = the newest).
+    // Library audios whose words or keywords contain every word of the search (blank = the newest),
+    // the ones saved here (made_for "shadowing") first.
     const searchSaved = async () => {
         setSearching(true);
         setSearchError(null);
         try {
-            const res = await api.get("/api/shadowing/sentences/", { params: { q: searchQuery.trim() } });
-            setSearchResults(res.data.sentences as SavedSentence[]);
+            const res = await api.get("/english/audios/", { params: { q: searchQuery.trim(), prefer: "shadowing" } });
+            setSearchResults(res.data as SavedSentence[]);
         } catch (err) {
             console.error("Shadowing: searching saved sentences failed:", err);
             const message = (err as { response?: { data?: { error?: string } } }).response?.data?.error;
@@ -340,22 +358,17 @@ export default function Shadowing() {
         setLoadingSavedId(saved.id);
         setSearchError(null);
         try {
-            const res = await api.get(`/api/shadowing/sentence_audio/${saved.id}/`, { responseType: "blob" });
+            const res = await api.get(`/english/audios/${saved.id}/file/`, { responseType: "blob" });
             const blob = res.data as Blob;
             if (reference) URL.revokeObjectURL(reference.url);
-            setSentence(saved.sentence);
+            setSentence(saved.text);
             setReference({
                 blob,
                 url: URL.createObjectURL(blob),
-                sentence: saved.sentence,
+                sentence: saved.text,
                 ssml: "",
-                voice: saved.voice,
-                tts: {
-                    provider: saved.tts.provider ?? "",
-                    voice: saved.tts.voice ?? "",
-                    speed: saved.tts.speed,
-                    ssmlRate: saved.tts.ssml_rate,
-                },
+                voice: savedLabel(saved),
+                tts: savedTts(saved),
                 source: "s3",
                 savedId: saved.id,
             });
@@ -477,7 +490,7 @@ export default function Shadowing() {
     };
 
     // Keeps this reference sentence and its audio, searchable by its words and the keywords
-    // (audio in S3 under audios/shadowing_sentences/, details in the database).
+    // (an Audio row in the database, its MP3 in S3 under audios/library/).
     // Downloads the reference as a 16 kHz mono WAV (converted in the browser), named after its sentence.
     const [convertingWav, setConvertingWav] = useState(false);
     // Converts an audio blob to a 16 kHz mono WAV and hands it to the browser as a download.
@@ -511,8 +524,8 @@ export default function Shadowing() {
         try {
             const blob = reference?.savedId === saved.id
                 ? reference.blob
-                : ((await api.get(`/api/shadowing/sentence_audio/${saved.id}/`, { responseType: "blob" })).data as Blob);
-            await saveAsWav(blob, saved.sentence);
+                : ((await api.get(`/english/audios/${saved.id}/file/`, { responseType: "blob" })).data as Blob);
+            await saveAsWav(blob, saved.text);
         } catch (err) {
             console.error("Shadowing: downloading the saved audio as WAV failed:", err);
             setSearchError("Downloading that audio as WAV failed.");
@@ -536,12 +549,11 @@ export default function Shadowing() {
             appendOptions(form);
             const res = await api.post("/api/shadowing/save_sentence/", form);
             setSavedSentence({ url: reference.url, keywords: res.data.keywords as string[] });
-            const s3Key = (res.data.s3_key as string | undefined) ?? "";
-            const prefix = s3Key.slice(0, s3Key.lastIndexOf("/") + 1);
+            const s3Path = ((res.data.url as string | undefined) ?? "").replace(/^https:\/\/[^/]+\//, "");
             toast.success(
                 <div className="flex flex-col gap-1 text-sm">
-                    <span>Audio saved to S3 prefix:</span>
-                    <code className="break-all">{prefix || "audios/shadowing_sentences/"}</code>
+                    <span>Saved to the audio library (ID {res.data.id}). Audio file in S3:</span>
+                    <code className="break-all">{s3Path}</code>
                     <span>The sentence, keywords, voice and scoring options were saved to the database.</span>
                 </div>,
                 { autoClose: 8000 },
@@ -617,19 +629,21 @@ export default function Shadowing() {
                             </button>
                         </form>
                         <p className="text-xs text-gray-600">
-                            Finds the saved sentences that contain every word you type, in the sentence or its
-                            keywords. Leave it blank to list the newest. Check one to use it as the reference.
+                            Searches the audio library: the sentences saved here (listed first) and the audio saved
+                            from question forms. Finds the ones that contain every word you type, in the sentence or
+                            its keywords. Leave it blank to list the newest. Check one to use it as the reference.
                         </p>
                         {searchError && <p className="text-sm text-red-700" role="alert">{searchError}</p>}
                         {searchResults && (searchResults.length === 0 ? (
-                            <p className="text-sm text-gray-700">No saved sentences match.</p>
+                            <p className="text-sm text-gray-700">No audio in the library matches.</p>
                         ) : (
                             <ul className="flex flex-col gap-2 max-h-96 overflow-y-auto">
                                 {searchResults.map((saved) => {
                                     const checked = reference?.savedId === saved.id;
                                     const details = [
-                                        saved.voice,
+                                        savedLabel(saved),
                                         new Date(saved.created_at).toLocaleDateString(),
+                                        saved.made_for === "question" ? "saved from a question" : "",
                                         saved.keywords.length > 0 ? `keywords: ${saved.keywords.join(", ")}` : "",
                                     ].filter(Boolean).join(" · ");
                                     return (
@@ -647,8 +661,8 @@ export default function Shadowing() {
                                                 />
                                                 <span className="flex flex-col">
                                                     <span className="flex flex-wrap items-center gap-2">
-                                                        <span className="font-medium">{saved.sentence}</span>
-                                                        <PlayButton src={saved.audio_url} label={saved.sentence} />
+                                                        <span className="font-medium">{saved.text}</span>
+                                                        <PlayButton src={saved.url} label={saved.text} />
                                                         <button
                                                             type="button"
                                                             onClick={(e) => {
@@ -872,9 +886,10 @@ export default function Shadowing() {
                             </div>
                             <p className="text-xs text-gray-900">
                                 Like this reference? Save it to find it later by any word of the sentence or by its keywords
-                                (separate keywords with commas). The audio file is stored in S3, in a new folder under{" "}
-                                <code>audios/shadowing_sentences/</code>. A database row keeps everything else: the
-                                sentence, keywords, voice, speed, scoring options and the S3 location of the audio.
+                                (separate keywords with commas). It goes into the audio library, shared with the question
+                                forms: the audio file is stored in S3 under{" "}
+                                <code><strong className="text-blue-700">audios/library</strong>/ (or <strong className="text-blue-700">dev/audios/library</strong>/</code> if in dev), and a database row (Audio) keeps everything
+                                else: the sentence, keywords, voice, speed, scoring options and the S3 location of the audio.
                             </p>
                             {savedSentence?.url === reference.url && (
                                 <p className="text-sm text-green-800">
@@ -1112,7 +1127,9 @@ export default function Shadowing() {
                     {!referenceReady && <span className="text-sm text-gray-600">Choose or generate the reference first.</span>}
                 </div>
                 <p className="text-xs text-[#5C3A1E]">
-                    Reference audio will be sent to S3 directory: <code>/audios/shadowing</code> for students to pick up
+                    Reference audio will be sent to S3 directory:{" "}
+                    <code><strong className="text-blue-700">/audios/temp_shadowing_sentences</strong></code> (or{" "}
+                    <code><strong className="text-blue-700">dev/audios/temp_shadowing_sentences</strong></code> if in dev) for students to pick up
                     (via Redis signal). Files will be auto-deleted after 2 days according to rule set in S3.
                 </p>
             </fieldset>
