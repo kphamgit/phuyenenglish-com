@@ -15,6 +15,18 @@ export interface QuestionAttemptAssesmentResultsProps {
   score: number,
   error_flag: boolean,
   cloze_question_results?: ClozeAnswerResultsProps[] | undefined,
+  shadowing_results?: ShadowingQuestionTake | null, // format 9
+}
+
+// A scored take of a Shadowing question (format 9): /api/shadowing/assess_question/'s
+// "question_take" (with the token), and the submit's shadowing_results (without it).
+export interface ShadowingQuestionTake {
+  token?: string,
+  pct: number,                    // the melody % (or the overall %, see basis)
+  basis: 'melody' | 'overall',    // overall when the melody couldn't be measured
+  points: number,
+  max_points: number,
+  passed: boolean,                // any points: under 50% = 0, 50-69% = 5, 70%+ = 10
 }
 
 type ClozeAnswerResultsProps = {
@@ -139,6 +151,10 @@ export interface QuestionProps {
     hint?: string,
     explanation?: string,
     timeout: number,
+    // The question's audio (null if none); a Shadowing question (format 9) is repeated after it.
+    audio?: { id: number, url: string, text: string } | null,
+    hide_text?: boolean,   // format 9: hide the sentence until the student's first take
+    scoring_options?: Record<string, unknown> | null, // format 9: how the recording is scored (server side)
   }
 
   export interface QuizAttemptProps {

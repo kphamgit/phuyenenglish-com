@@ -196,6 +196,11 @@ function TakeQuizLive({ live_quiz_id , live_question_number,  parent_callback}: 
 
       const handleSubmit = () => {
            //console.log("TakeQuizLive: handleSubmit called");
+            // A Shadowing question is answered by a checked recording (its answer is the take's token).
+            if (question?.format === 9 && !childRef.current?.getAnswer()) {
+              alert("Record yourself and click “Check my recording” first.");
+              return;
+            }
             setShowQuestion(false); //
             const url = `/api/process_live_question_attempt/`;
             //console.log("POSTing to url =", url);

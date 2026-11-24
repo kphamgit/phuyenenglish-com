@@ -77,6 +77,13 @@ function IncorrectModal({ parentCallback, format, answer_key, content, explanati
             {format === 10 && <DropDown content={content} processQuestionResults={processQuestionResults} />}
             {format === 12 && <SentenceScramble content={content} processQuestionResults={processQuestionResults} />}
             {format === 13 && <WritingExplanation answer_key={answer_key} />}
+            {format === 9 && processQuestionResults?.shadowing_results && (
+              <p className="my-3">
+                Your {processQuestionResults.shadowing_results.basis === 'melody' ? 'melody' : 'overall score'}:{' '}
+                {Math.round(processQuestionResults.shadowing_results.pct)}% (50% or more for 5 points, 70% or more for 10) →{' '}
+                {processQuestionResults.shadowing_results.points} / {processQuestionResults.shadowing_results.max_points} points.
+              </p>
+            )}
             { explanation &&
             <div className="bg-cyan-200 mt-3 p-2">{explanation}</div>
           }

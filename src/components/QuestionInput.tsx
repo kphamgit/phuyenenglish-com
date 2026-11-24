@@ -11,6 +11,7 @@ import { WordsSelect } from './questions/WordsSelect';
 import { DropDowns } from './questions/DropDowns';
 import SentenceScramble from './questions/SentenceScramble';
 import WritingQuestion from './questions/WritingQuestion';
+import ShadowingQuestion from './questions/ShadowingQuestion';
 
 interface QuestionInputProps {
   question: QuestionProps;
@@ -53,6 +54,8 @@ export default function QuestionInput({ question, ref, submitted }: QuestionInpu
       return <SRNonContinuous content={content} ref={ref} />;
     case 8:
       return <WordsSelect content={content} ref={ref} />;
+    case 9:
+      return <ShadowingQuestion question={question} ref={ref} />;
     case 10:
       return <DropDowns content={content} ref={ref} />;
     case 12:
