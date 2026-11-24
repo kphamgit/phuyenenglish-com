@@ -1,42 +1,23 @@
-import { useEffect, useState } from "react";
-import chimeSound from "../../assets/chime.mp3";
+import { useState } from "react";
 import api from "../../api";
-import { useWebSocket } from "../context/WebSocketContext";
-import type { WebSocketMessageProps } from "../shared/types";
 import { EvaluationView } from "./EvaluationView";
 import { TargetedSentence } from "./TargetedSentence";
 import type { EvaluationResult, ShadowingPrompt } from "./evaluation";
 import { useRecorder } from "./useRecorder";
 
-// Student side of Shadowing: when the teacher sends a reference ("shadowing_prompt" ws message),
-// show the sentence and the reference to play, let the student record themselves repeating it,
-// send the recording to Django (/api/shadowing/assess/, scored by VoiceAnalyzer_Claude with the
-// teacher's options), and show the result. The teacher gets the same result separately.
+// Student side of Shadowing: the exercise the teacher sent (HomeStudent receives the
+// "shadowing_prompt" ws message, keeps it and passes it here, keyed by its shadowing_id so a new
+// exercise starts clean). Shows the sentence and the reference to play, lets the student record
+// themselves repeating it, sends the recording to Django (/api/shadowing/assess/, scored by
+// VoiceAnalyzer_Claude with the teacher's options), and shows the result in the exercise's place.
+// The teacher gets the same result separately.
 
-export default function StudentShadowing({ hidden = false }: { hidden?: boolean }) {
-    const { eventEmitter } = useWebSocket();
-    const [prompt, setPrompt] = useState<ShadowingPrompt | null>(null);
-
+export default function StudentShadowing({ prompt, hidden = false }: { prompt: ShadowingPrompt | null; hidden?: boolean }) {
     const { recording, converting, take, error: recorderError, record: startRecording, stop, reset } = useRecorder();
     const [assessing, setAssessing] = useState(false);
     const [result, setResult] = useState<EvaluationResult | null>(null);
     const [submitError, setSubmitError] = useState<string | null>(null);
     const error = recorderError ?? submitError;
-
-    useEffect(() => {
-        const handleMessage = (data: WebSocketMessageProps) => {
-            if (data.message_type !== "shadowing_prompt") return;
-            reset();
-            setPrompt(data.content as ShadowingPrompt);
-            setResult(null);
-            setSubmitError(null);
-            new Audio(chimeSound).play().catch(() => {});
-        };
-        eventEmitter?.on("message", handleMessage);
-        return () => {
-            eventEmitter?.off("message", handleMessage);
-        };
-    }, [eventEmitter, reset]);
 
     // A new take replaces the scores of the previous one.
     const record = () => {
@@ -64,14 +45,40 @@ export default function StudentShadowing({ hidden = false }: { hidden?: boolean 
         }
     };
 
-    const dismiss = () => {
+    // Retry: clears the recording and its score, so the student records a new take.
+    const retry = () => {
         reset();
-        setPrompt(null);
         setResult(null);
         setSubmitError(null);
     };
 
     if (!prompt || hidden) return null;
+
+    // Once scored, the result takes the exercise's place; Retry brings the exercise back.
+    if (result) {
+        return (
+            <div className="flex flex-col items-center my-4">
+                <div className="w-full max-w-4xl bg-teal-50 border-2 border-teal-400 rounded-lg shadow-lg p-6 flex flex-col gap-3">
+                    <p className="text-xs uppercase tracking-wide text-teal-700 font-semibold text-center">
+                        Shadowing: your result
+                    </p>
+                    <StudentResult result={result} />
+                    {take && (
+                        <label className="flex items-center gap-3 text-sm text-gray-700">
+                            Your recording
+                            <audio key={take.url} src={take.url} controls className="min-w-0 flex-1" />
+                        </label>
+                    )}
+                    <button
+                        onClick={retry}
+                        className="self-center px-5 py-2 rounded-md bg-amber-600 hover:bg-amber-700 text-white font-semibold"
+                    >
+                        Retry
+                    </button>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="flex flex-col items-center my-4">
@@ -129,14 +136,7 @@ export default function StudentShadowing({ hidden = false }: { hidden?: boolean 
                 )}
 
                 {error && <p className="text-red-600 text-center" role="alert">⚠️ {error}</p>}
-                {result && <StudentResult result={result} />}
 
-                <button
-                    onClick={dismiss}
-                    className="self-center mt-1 px-4 py-1 rounded-md bg-gray-600 hover:bg-gray-800 text-white text-sm"
-                >
-                    Dismiss
-                </button>
             </div>
         </div>
     );

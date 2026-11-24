@@ -116,7 +116,18 @@ export default function CardReview({ onComplete }: CardReviewProps) {
     <div className="flex flex-col items-center w-full max-w-2xl mx-auto p-6">
       <div className="w-full flex justify-between items-center mb-4">
         <h2 className="text-xl font-bold text-gray-800">CardReview: What does this word mean?</h2>
-        <span className="text-sm text-gray-500">{index + 1} / {cards.length}</span>
+        <div className="flex items-center gap-4">
+          <span className="text-sm text-gray-500">{index + 1} / {cards.length}</span>
+          {/* Stops the review here: the cards not answered yet stay due for next time. */}
+          <button
+            onClick={onComplete}
+            aria-label="Close"
+            title="Close the review"
+            className="text-2xl leading-none text-gray-500 hover:text-gray-800"
+          >
+            ✕
+          </button>
+        </div>
       </div>
 
       <AnimatePresence mode="wait">

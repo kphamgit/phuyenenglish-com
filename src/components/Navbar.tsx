@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 // import { IoIosArrowDown } from "react-icons/io";
 // import { useAutoAnimate } from "@formkit/auto-animate/react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import type { LevelProps, CategoryProps } from "./Level";
 import api from "../api";
 import { useSelector } from "react-redux";
@@ -16,6 +16,15 @@ import type { RootState } from "../redux/store";
     const [categoriesLinks, setCategoriesLinks] = useState<{ label: string; link: string }[]>([])
     const [selectedLevel, setSelectedLevel] = useState<number | null>(null)
     const dropdownRef = useRef<HTMLDivElement | null>(null); // Ref for the dropdown container
+
+    // The level of the page being shown: every units/quiz page is under /categories/<id>/, and
+    // each level lists its categories. It keeps the level's tab in the selected color while its
+    // units and quizzes are open.
+    const { pathname } = useLocation();
+    const categoryId = Number(pathname.match(/^\/categories\/(\d+)/)?.[1]);
+    const currentLevel = levels?.find((level) => level.categories?.some((c) => c.id === categoryId))?.id ?? null;
+    // The selected tab: the one whose dropdown is open, otherwise the current page's level.
+    const highlightedLevel = selectedLevel ?? currentLevel;
 
     const handleClickOutside = (event: MouseEvent) => {
       
@@ -84,7 +93,8 @@ import type { RootState } from "../redux/store";
               >
              
                   <button
-                  className="bg-amber-700 text-white flex cursor-pointer p-2  items-center text-sm "
+                  // The selected level takes the dropdown's green.
+                  className={`${highlightedLevel === level.id ? "bg-green-700" : "bg-amber-700"} text-white flex cursor-pointer p-2  items-center text-sm`}
                      onClick={() => showDropdownLinks(level.id)}>{level.name}
                   </button>
                   {/* dropdown */}  
