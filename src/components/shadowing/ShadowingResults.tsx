@@ -78,7 +78,8 @@ export default function ShadowingResults({ shadowingId }: { shadowingId?: string
     const linking = !exercise || exercise.options.strict_connected_speech || exercise.options.targeted_words.trim() !== "";
     // Word stress is only checked (and shown) when the exercise has stress words.
     const wordStress = !exercise || (exercise.options.stress_words ?? "").trim() !== "";
-    const columns = 6 + (wordStress ? 2 : 0) + (RISING_TONE_ENABLED ? 1 : 0) + (linking ? 1 : 0);
+    // Word stress itself isn't scored any more: only its melody gets a column.
+    const columns = 6 + (wordStress ? 1 : 0) + (RISING_TONE_ENABLED ? 1 : 0) + (linking ? 1 : 0);
 
     return (
         <div className="flex flex-col gap-2 bg-white rounded-md p-3 border border-gray-300">
@@ -104,7 +105,6 @@ export default function ShadowingResults({ shadowingId }: { shadowingId?: string
                                     <th className={cell}>Recording</th>
                                     {wordStress && <th className={cell}>Melody</th>}
                                     <th className={cell}>Pronunciation</th>
-                                    {wordStress && <th className={cell}>Word stress</th>}
                                     {RISING_TONE_ENABLED && <th className={cell}>Intonation</th>}
                                     {linking && <th className={cell}>Linking</th>}
                                     <th className={cell}>Heard</th>
@@ -141,7 +141,6 @@ export default function ShadowingResults({ shadowingId }: { shadowingId?: string
                                                     </td>
                                                 )}
                                                 <td className={cell}>{pct(s.pronunciation_score_pct)}</td>
-                                                {wordStress && <td className={cell}>{pct(s.stress_match_pct)}</td>}
                                                 {RISING_TONE_ENABLED && <td className={cell}>{pct(s.intonation_score_pct)}</td>}
                                                 {linking && <td className={cell}>{s.connected_speech_summary}</td>}
                                                 <td className={`${cell} font-mono`}>{s.heard_transcript}</td>

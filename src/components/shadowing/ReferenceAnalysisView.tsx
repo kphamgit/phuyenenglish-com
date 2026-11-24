@@ -2,7 +2,8 @@
 // (POST /api/analyze-reference, through Django's /api/shadowing/analyze_reference/), shown
 // under the word's field in the teacher's Scoring options ("Analyze reference audio").
 
-import { ContourChart, Spelled, StressPattern } from "./EvaluationView";
+import { ContourChart, IpaSyllables, Spelled, StressPattern } from "./EvaluationView";
+import { chartLabels, type Syllabified } from "./evaluation";
 
 export interface ReferenceSyllable {
     syllable_index: number;
@@ -42,6 +43,7 @@ export interface ReferenceWordAnalysis {
     syllables?: ReferenceSyllable[];
     melody?: ReferenceMelody | null;
     hyphenated?: string[] | null; // the syllables as spelled (added by Django), e.g. ["a", "pol", "o", "gy"]
+    syllabified?: Syllabified; // the word's IPA in syllables (from the IPA typed for it, else the dictionary)
 }
 
 export interface ReferenceAnalysis {
@@ -61,6 +63,8 @@ export function ReferenceAnalysisView({ analysis: a }: { analysis: ReferenceWord
     // Syllables are named by their spelling (“pol”), as in the students' results; by number
     // only when the dictionary's split doesn't fit.
     const parts = a.hyphenated && a.hyphenated.length === a.syllable_count ? a.hyphenated : null;
+    // The melody chart's labels: the IPA syllables (and the Vietnamese code on top), else the spelling.
+    const labels = chartLabels(a.syllabified, a.hyphenated, a.expected_pattern ?? a.reference_pattern);
     const name = (n: number | null | undefined) =>
         n != null && parts?.[n - 1] ? `“${parts[n - 1]}”` : `the ${_ordinal(n)} syllable`;
     return (
@@ -83,6 +87,7 @@ export function ReferenceAnalysisView({ analysis: a }: { analysis: ReferenceWord
                     )}
                 </div>
             </div>
+            {a.syllabified && <IpaSyllables syllabified={a.syllabified} />}
             {disagree && (
                 <p className="text-amber-700">
                     The reference audio stresses {name(a.reference_stressed_syllable)}, but the dictionary stresses{" "}
@@ -115,7 +120,8 @@ export function ReferenceAnalysisView({ analysis: a }: { analysis: ReferenceWord
                             reference={a.melody.full_contour?.length ? a.melody.full_contour : a.melody.contour}
                             perSyllable={a.melody.points_per_syllable}
                             syllables={a.melody.full_contour?.length ? a.melody.full_contour_syllables ?? [] : a.melody.contour_syllables}
-                            parts={parts}
+                            parts={labels.parts}
+                            subParts={labels.sub}
                         />
                     )}
                     <div className="min-w-48 flex-1">

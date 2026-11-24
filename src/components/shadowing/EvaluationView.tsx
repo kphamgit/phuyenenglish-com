@@ -6,6 +6,9 @@ import {
   type EvaluationResult,
   type PitchDirection,
   type StressComparison,
+  chartLabels,
+  fitParts,
+  type Syllabified,
   type SyllableCoaching,
   type WordStress,
 } from './evaluation';
@@ -86,6 +89,11 @@ function WordStressTable({ words, teacher = false }: { words: WordStress[]; teac
           ? 'bg-red-100 text-red-800'
           : 'bg-gray-100 text-gray-700';
   const which = (n: number | null | undefined) => (n == null ? '' : ` (syllable ${n})`);
+  // Word stress isn't scored any more (the analyzer sends the patterns only, status "measured");
+  // results scored before that keep their Result and Score columns.
+  const scored = words.some((w) => w.score_pct != null || ['pass', 'weak_contrast', 'wrong_syllable'].includes(w.status));
+  const notes = scored || words.some((w) => w.message);
+  const columns = 4 + (scored ? 2 : 0) + (notes ? 1 : 0);
   return (
     <div className="overflow-x-auto">
       <div className="font-semibold text-gray-700">Word Syllables Stress Check</div>
@@ -94,10 +102,11 @@ function WordStressTable({ words, teacher = false }: { words: WordStress[]; teac
           <tr className="text-gray-500">
             <th className={cell}>Word</th>
             <th className={cell}>Expected</th>
+            <th className={cell}>Reference</th>
             <th className={cell}>Yours</th>
-            <th className={cell}>Result</th>
-            <th className={cell}>Score</th>
-            <th className={cell}>Notes</th>
+            {scored && <th className={cell}>Result</th>}
+            {scored && <th className={cell}>Score</th>}
+            {notes && <th className={cell}>Notes</th>}
           </tr>
         </thead>
         <tbody>
@@ -110,9 +119,6 @@ function WordStressTable({ words, teacher = false }: { words: WordStress[]; teac
             const same = w.right_syllable ?? (expectedPattern != null && expectedPattern === w.recorded_pattern);
             // The syllables as spelled (from the dictionary), if they fit the analyzer's count.
             const parts = fitParts(w.hyphenated, expectedPattern);
-            // Teacher: when the dictionary decided and the reference voice stressed another syllable.
-            const refDiffers =
-              teacher && source === 'dictionary' && w.reference_stressed_syllable != null && w.reference_stressed_syllable !== expected;
             // The melody row when at least one syllable has a pitch curve (a word whose last syllable
             // trails off into creak or whisper still shows the fall within its stressed syllable).
             const melody = (w.pitch_direction?.contour_syllables?.length ?? 0) >= 1 ? w.pitch_direction : undefined;
@@ -125,31 +131,35 @@ function WordStressTable({ words, teacher = false }: { words: WordStress[]; teac
                     <StressPattern pattern={expectedPattern} tone="green" />
                     <span className="text-gray-500 text-xs">{which(expected)}</span>
                     {parts && <Spelled parts={parts} stressed={expected} />}
+                    {teacher && w.syllabified && <IpaSyllables syllabified={w.syllabified} compact />}
                     {source && (
                       <div className="text-[11px] text-gray-500 whitespace-normal">
                         {source === 'dictionary' ? 'from the dictionary' : 'from the reference voice'}
                         {w.stress_source_reason && <> ({w.stress_source_reason})</>}
                       </div>
                     )}
-                    {refDiffers && (
-                      <div className="text-[11px] text-amber-700 whitespace-normal">
-                        The reference voice stressed{' '}
-                        {parts?.[w.reference_stressed_syllable! - 1]
-                          ? `“${parts[w.reference_stressed_syllable! - 1]}”`
-                          : `syllable ${w.reference_stressed_syllable}`}
-                        .
-                      </div>
-                    )}
+                  </td>
+                  <td className={`${rowCell} whitespace-nowrap`}>
+                    {/* What the reference voice stressed (measured): amber when it isn't the expected syllable. */}
+                    <StressPattern
+                      pattern={w.reference_pattern}
+                      tone={w.reference_stressed_syllable != null && w.reference_stressed_syllable !== expected ? 'amber' : 'green'}
+                    />
+                    <span className="text-gray-500 text-xs">{which(w.reference_stressed_syllable)}</span>
+                    {parts && <Spelled parts={parts} stressed={w.reference_stressed_syllable} />}
                   </td>
                   <td className={`${rowCell} whitespace-nowrap`}>
                     <StressPattern pattern={w.recorded_pattern} tone={same ? 'green' : 'amber'} />
                     <span className="text-gray-500 text-xs">{which(w.recorded_stressed_syllable)}</span>
                     {parts && <Spelled parts={parts} stressed={w.recorded_stressed_syllable} />}
                   </td>
-                  <td className={rowCell}>
-                    <span className={`inline-block rounded px-1.5 text-xs whitespace-nowrap ${tone(w.status)}`}>{w.badge}</span>
-                  </td>
-                  <td className={rowCell}>{pct(w.score_pct)}</td>
+                  {scored && (
+                    <td className={rowCell}>
+                      <span className={`inline-block rounded px-1.5 text-xs whitespace-nowrap ${tone(w.status)}`}>{w.badge}</span>
+                    </td>
+                  )}
+                  {scored && <td className={rowCell}>{pct(w.score_pct)}</td>}
+                  {notes && (
                   <td className={rowCell}>
                     {w.status === 'pass' ? (
                       w.weakest_contrast_pct != null ? (
@@ -163,13 +173,14 @@ function WordStressTable({ words, teacher = false }: { words: WordStress[]; teac
                       w.message
                     )}
                   </td>
+                  )}
                 </tr>
                 {/* The word's melody, in its own row under its stress result. */}
                 {melody && (
                   <tr>
                     <td className={`${cell} text-xs text-gray-500`}>Melody</td>
-                    <td className={cell} colSpan={5}>
-                      <PitchDirectionCell d={melody} parts={parts} />
+                    <td className={cell} colSpan={columns - 1}>
+                      <PitchDirectionCell d={melody} parts={parts} chart={chartLabels(w.syllabified, w.hyphenated, expectedPattern)} />
                     </td>
                   </tr>
                 )}
@@ -202,7 +213,12 @@ function WordMelodyList({ words }: { words: WordStress[] }) {
           <div key={i} className="flex flex-col gap-1 border-b border-gray-200 pb-2">
             <span className="font-semibold">{w.word}</span>
             {melody ? (
-              <PitchDirectionCell d={melody} parts={parts} advice={false} />
+              <PitchDirectionCell
+                d={melody}
+                parts={parts}
+                advice={false}
+                chart={chartLabels(w.syllabified, w.hyphenated, w.expected_pattern ?? w.reference_pattern)}
+              />
             ) : (
               <span className="text-xs text-gray-600">{w.pitch_direction?.message || w.message || 'The melody could not be measured.'}</span>
             )}
@@ -213,11 +229,6 @@ function WordMelodyList({ words }: { words: WordStress[] }) {
   );
 }
 
-// The dictionary's syllables, used only when there's one per circle of the pattern.
-function fitParts(parts: string[] | null | undefined, pattern: string | null | undefined): string[] | null {
-  const n = (pattern ?? '').trim().split(/\s+/).filter(Boolean).length;
-  return parts && parts.length > 1 && parts.length === n ? parts : null;
-}
 
 // The word as spelled syllables, e.g. bas-ket-ball, with the stressed one in bold.
 export function Spelled({ parts, stressed }: { parts: string[]; stressed: number | null | undefined }) {
@@ -229,6 +240,71 @@ export function Spelled({ parts, stressed }: { parts: string[]; stressed: number
           {i + 1 === stressed ? <strong className="text-gray-900">{p}</strong> : p}
         </Fragment>
       ))}
+    </div>
+  );
+}
+
+// A stress word's IPA in syllables, e.g. /ə-ˈpɒ-lə-dʒi/ with the primary-stressed syllable in bold,
+// and where it came from: the IPA the teacher typed, or the dictionary (US). Warns when its
+// syllables don't match the count the analyzer measured. The Vietnamese code the teacher typed
+// (ơ-pô-lơ-di) goes on top, dark, with the IPA lighter under it. Compact: smaller, for a table cell.
+export function IpaSyllables({ syllabified: s, compact = false }: { syllabified: Syllabified; compact?: boolean }) {
+  if (!s.syllables?.length) {
+    return s.ipa ? (
+      <div className={`${compact ? 'text-[11px]' : 'text-xs'} text-amber-700 whitespace-normal`}>
+        IPA /{s.ipa}/ couldn't be split into syllables.
+      </div>
+    ) : null;
+  }
+  const mark = (stress: string | null) => (stress === 'primary' ? 'ˈ' : stress === 'secondary' ? 'ˌ' : '');
+  const vietParts = s.viet_syllables ?? [];
+  return (
+    <div className={`${compact ? 'text-[11px]' : 'text-xs'} whitespace-normal`}>
+      {s.viet && (
+        <div className="text-gray-900" lang="vi">
+          {!compact && <span className="text-gray-600">Vietnamese: </span>}
+          {s.viet_matches_ipa ? (
+            vietParts.map((p, i) => (
+              <Fragment key={i}>
+                {i > 0 && '-'}
+                {s.syllables[i]?.stress === 'primary' ? <strong>{p}</strong> : p}
+              </Fragment>
+            ))
+          ) : (
+            <>
+              {s.viet}{' '}
+              <span className="text-amber-700">
+                ({vietParts.length} part{vietParts.length === 1 ? '' : 's'}, but the IPA has {s.syllables.length}{' '}
+                syllable{s.syllables.length === 1 ? '' : 's'})
+              </span>
+            </>
+          )}
+        </div>
+      )}
+      <div className="text-gray-500">
+      {!compact && <span>IPA: </span>}
+      <span className="font-mono">
+        /
+        {s.syllables.map((x, i) => (
+          <Fragment key={i}>
+            {i > 0 && '-'}
+            {x.stress === 'primary' ? (
+              <strong className="text-gray-700">{mark(x.stress) + x.text}</strong>
+            ) : (
+              mark(x.stress) + x.text
+            )}
+          </Fragment>
+        ))}
+        /
+      </span>{' '}
+      <span>({s.source === 'ipa' ? 'your IPA' : 'dictionary, US'})</span>
+      </div>
+      {s.matches_cmu === false && (
+        <div className="text-amber-700">
+          {s.syllable_count} syllable{s.syllable_count === 1 ? '' : 's'} here, but the check measured{' '}
+          {s.cmu_syllable_count} (the dictionary's count).
+        </div>
+      )}
     </div>
   );
 }
@@ -352,10 +428,12 @@ function PitchDirectionCell({
   d,
   parts = null,
   advice = true,
+  chart,
 }: {
   d: PitchDirection;
-  parts?: string[] | null;
+  parts?: string[] | null; // the spelled syllables, for the text (“pol” left out: …)
   advice?: boolean;
+  chart?: { parts: string[] | null; sub: string[] | null }; // the chart's labels (chartLabels); default: parts
 }) {
   const tone =
     d.status === 'match'
@@ -379,7 +457,8 @@ function PitchDirectionCell({
             recorded={d.full_recorded_contour?.length ? d.full_recorded_contour : d.recorded_contour}
             perSyllable={d.points_per_syllable ?? 10}
             syllables={(d.full_reference_contour?.length ? d.full_contour_syllables : d.contour_syllables) ?? []}
-            parts={parts}
+            parts={chart ? chart.parts : parts}
+            subParts={chart?.sub}
           />
         )}
         {left.map((sy) => (
@@ -398,7 +477,8 @@ function PitchDirectionCell({
 }
 
 // Two pitch curves (semitones) on one small chart: reference dashed grey, yours solid blue,
-// with a light line between syllables and each syllable underneath (its spelling, or its number).
+// with a light line between syllables and each syllable underneath (its IPA or spelling, or its
+// number; with subParts, the Vietnamese code on top, dark, and the IPA under it, light).
 // Without `recorded` it draws the reference alone (the teacher's "Analyze reference audio").
 // null points = no reliable pitch there: the curve has a gap, and a syllable whose reference has
 // no pitch at all keeps its place, its label greyed with "no pitch" in it.
@@ -408,15 +488,19 @@ export function ContourChart({
   perSyllable,
   syllables,
   parts = null,
+  subParts = null,
 }: {
   reference: (number | null)[];
   recorded?: (number | null)[];
   perSyllable: number;
   syllables: number[];
-  parts?: string[] | null; // the syllables as spelled; labels the chart instead of the numbers
+  parts?: string[] | null; // the syllables (IPA or spelled); labels the chart instead of the numbers
+  subParts?: string[] | null; // the Vietnamese code's parts, one per syllable: a line above `parts`
 }) {
   const W = 180;
-  const H = 64;
+  const sub = subParts && subParts.length > 0 ? subParts : null;
+  const labels = sub ? 22 : 12; // the label lines' height under the curves
+  const H = 52 + labels;
   const pad = 4;
   const all = [...reference, ...(recorded ?? [])].filter((v): v is number => v != null);
   const lo = all.length ? Math.min(...all) : 0;
@@ -424,7 +508,7 @@ export function ContourChart({
   const span = Math.max(hi - lo, 1);
   const n = Math.max(reference.length, recorded?.length ?? 0);
   const x = (i: number) => pad + (i / Math.max(n - 1, 1)) * (W - 2 * pad);
-  const y = (v: number) => pad + (1 - (v - lo) / span) * (H - 2 * pad - 10);
+  const y = (v: number) => pad + (1 - (v - lo) / span) * (H - labels - 2 * pad + 2);
   // One path, lifted over the gaps (null points).
   const path = (vals: (number | null)[]) => {
     let d = '';
@@ -453,22 +537,41 @@ export function ContourChart({
         const noPitch = reference.slice(k * perSyllable, (k + 1) * perSyllable).every((v) => v == null);
         return (
           <g key={k}>
-            {k > 0 && <line x1={x0} x2={x0} y1={pad} y2={H - 12} stroke="#e5e7eb" />}
+            {k > 0 && <line x1={x0} x2={x0} y1={pad} y2={H - labels} stroke="#e5e7eb" />}
             {noPitch && (
-              <text x={(x0 + x1) / 2} y={(H - 12) / 2 + 3} fontSize="8" textAnchor="middle" fill="#9ca3af" fontStyle="italic">
+              <text x={(x0 + x1) / 2} y={(H - labels) / 2 + 3} fontSize="8" textAnchor="middle" fill="#9ca3af" fontStyle="italic">
                 no pitch
               </text>
             )}
-            <text
-              x={(x0 + x1) / 2}
-              y={H - 2}
-              fontSize="10"
-              fontWeight="600"
-              textAnchor="middle"
-              fill={noPitch ? '#9ca3af' : '#1f2937'}
-            >
-              {parts?.[num - 1] ?? num}
-            </text>
+            {sub ? (
+              <>
+                {/* The Vietnamese code on top (dark), the IPA under it (light). */}
+                <text
+                  x={(x0 + x1) / 2}
+                  y={H - 12}
+                  fontSize="10"
+                  fontWeight="600"
+                  textAnchor="middle"
+                  fill={noPitch ? '#9ca3af' : '#1f2937'}
+                >
+                  {sub[num - 1] ?? ''}
+                </text>
+                <text x={(x0 + x1) / 2} y={H - 2} fontSize="9" textAnchor="middle" fill="#6b7280">
+                  {parts?.[num - 1] ?? num}
+                </text>
+              </>
+            ) : (
+              <text
+                x={(x0 + x1) / 2}
+                y={H - 2}
+                fontSize="10"
+                fontWeight="600"
+                textAnchor="middle"
+                fill={noPitch ? '#9ca3af' : '#1f2937'}
+              >
+                {parts?.[num - 1] ?? num}
+              </text>
+            )}
           </g>
         );
       })}
@@ -627,11 +730,17 @@ export function EvaluationView({
           </span>
         )}
         <span>Pronunciation: {pct(s.pronunciation_score_pct)}</span>
-        {ws && <span>Word stress: {pct(s.stress_match_pct)}</span>}
+        {/* Word stress is no longer scored (null); older results still have a score. */}
+        {ws && s.stress_match_pct != null && <span>Word stress: {pct(s.stress_match_pct)}</span>}
         {ws && ws.pitch_direction_score_pct != null && <span>Melody: {pct(ws.pitch_direction_score_pct)}</span>}
         {into && <span>Intonation: {pct(into.score_pct)}</span>}
         {linking && <span>Linking: {s.connected_speech_summary}</span>}
       </div>
+      {(s.targeted_word_warnings ?? []).map((w) => (
+        <div key={w.word} className="rounded px-2 py-1 bg-amber-100 text-amber-800">
+          ⚠️ Targeted word: {w.message}
+        </div>
+      ))}
       {into && (
         <div
           className={`rounded px-2 py-1 ${
@@ -738,7 +847,8 @@ export function EvaluationView({
           Settings:{' '}
           {ws ? (
             <>
-              stress words: {ws.stress_words.join(', ')} · stress contrast {ratio(ws.contrast_ratio)}
+              stress words: {ws.stress_words.join(', ')}
+              {s.stress_match_pct != null && <> · stress contrast {ratio(ws.contrast_ratio)}</>}
               {ws.melody_min_similarity != null && <> · melody match {ratio(ws.melody_min_similarity)}</>}
               {ws.stress_source && <> · stress pattern from {ws.stress_source === 'dictionary' ? 'CMU dictionary' : 'reference audio'}</>}
             </>

@@ -106,6 +106,26 @@ export interface PitchDirection {
     matched?: boolean | null;
   }[];
 }
+// A stress word's IPA split into syllables, display only (added by the analyzer to every stress
+// word, see its stress_word_syllables): from the IPA the teacher typed (source "ipa"), else the
+// CMU dictionary in US IPA ("cmu"), else nothing (source null). matches_cmu false: the analyzer
+// measured cmu_syllable_count syllables, so these don't line up with the stress pattern.
+export interface Syllabified {
+  source: 'ipa' | 'cmu' | null;
+  ipa: string | null; // the IPA the teacher typed for the word
+  syllabified: string | null; // e.g. "ə-ˈpɒ-lə-dʒi"
+  syllable_count: number | null;
+  // viet: the syllable's part of the Vietnamese code (only when viet_matches_ipa)
+  syllables: { text: string; stress: 'primary' | 'secondary' | null; viet?: string }[];
+  cmu_syllable_count: number | null;
+  matches_cmu: boolean | null;
+  // The Vietnamese pronunciation code the teacher typed (e.g. "ơ-pô-lơ-di"), split at the hyphens,
+  // and whether it has one part per IPA syllable (null: no code or no syllables). Missing on
+  // results from before the field existed.
+  viet?: string | null;
+  viet_syllables?: string[];
+  viet_matches_ipa?: boolean | null;
+}
 // Word Syllables Stress Check: one checked word (see the service's evaluate_word_syllable_stress).
 export interface WordStress {
   word: string;
@@ -126,8 +146,10 @@ export interface WordStress {
   // The syllables as spelled, from the dictionary (added by Django), e.g. ["bas", "ket", "ball"];
   // null when the dictionary's split doesn't have as many syllables as the analyzer found.
   hyphenated?: string[] | null;
+  syllabified?: Syllabified; // the word's IPA in syllables (missing on older results)
   weakest_contrast_pct?: number | null; // the student's weakest unstressed syllable, % of the reference's contrast
-  // "pass", "weak_contrast", "wrong_syllable", "not_heard", "not_measured", "single_syllable", "not_in_sentence"
+  // "measured" (stress isn't scored any more: no verdict, badge "—", score_pct null), "not_heard",
+  // "not_measured", "single_syllable", "not_in_sentence"; older results: "pass", "weak_contrast", "wrong_syllable"
   status: string;
   badge: string; // e.g. "✓ Good stress", "↕ More contrast", "✗ Wrong syllable"
   message: string;
@@ -162,6 +184,8 @@ export interface EvaluationResult {
     stress_match_pct: number | null; // the Word Syllables Stress Check score (null when no stress words)
     intonation_score_pct?: number | null; // null when the check doesn't apply
     connected_speech_summary: string; // e.g. "1 / 1 native links matched"
+    // Targeted words whose link can't be checked (missing on older results).
+    targeted_word_warnings?: { word: string; problem: 'not_in_sentence' | 'last_word'; message: string }[];
     heard_transcript: string;
     reference_coaching_summary?: string; // e.g. "MY[Low] MOTHER[High → Low] …"
     recorded_coaching_summary?: string; // e.g. "MY[✓ Good] MOTHER[S1: ✓ Good | S2: ↓ Lower pitch] …"
@@ -199,4 +223,30 @@ export interface ShadowingPrompt {
   shadowing_id: string;
   sentence: string;
   audio_url: string; // presigned S3 url of the reference (valid for an hour)
+}
+
+// The melody chart's syllable labels: the IPA syllables with their stress marks ("ə", "ˈpɒ",
+// "lə", "dʒi") when there's one per syllable of `pattern`, else the spelled syllables (or the
+// chart's numbers); and the Vietnamese code's parts to go on top of them (sub), when the analyzer
+// matched them to the IPA syllables.
+export function chartLabels(
+  syllabified: Syllabified | undefined,
+  hyphenated: string[] | null | undefined,
+  pattern: string | null | undefined,
+): { parts: string[] | null; sub: string[] | null } {
+  const n = (pattern ?? '').trim().split(/\s+/).filter(Boolean).length;
+  const mark = (stress: string | null) => (stress === 'primary' ? 'ˈ' : stress === 'secondary' ? 'ˌ' : '');
+  const ipa = (syllabified?.syllables ?? []).map((x) => mark(x.stress) + x.text);
+  const ipaFits = ipa.length > 1 && ipa.length === n;
+  const viet = syllabified?.viet_syllables ?? [];
+  return {
+    parts: ipaFits ? ipa : fitParts(hyphenated, pattern),
+    sub: ipaFits && syllabified?.viet_matches_ipa && viet.length === ipa.length ? viet : null,
+  };
+}
+
+// The dictionary's syllables, used only when there's one per circle of the pattern.
+export function fitParts(parts: string[] | null | undefined, pattern: string | null | undefined): string[] | null {
+  const n = (pattern ?? '').trim().split(/\s+/).filter(Boolean).length;
+  return parts && parts.length > 1 && parts.length === n ? parts : null;
 }

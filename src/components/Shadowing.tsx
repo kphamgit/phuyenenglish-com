@@ -7,7 +7,6 @@ import {
     DEFAULT_RISE_MATCH_RATIO,
     DEFAULT_MELODY_MIN_SIMILARITY,
     DEFAULT_STRESS_SOURCE,
-    DEFAULT_STRESS_CONTRAST_RATIO,
     LEGACY_STRESS_ENABLED,
     LINK_PAUSE_MARGIN_MS,
     RISING_TONE_ENABLED,
@@ -193,7 +192,21 @@ export default function Shadowing() {
     // One field per stress word; sent to the analyzer as "accept, apology".
     const [stressWordList, setStressWordList] = useState<string[]>([""]);
     const stressWords = stressWordList.map((w) => w.trim()).filter(Boolean).join(", ");
-    const [stressContrastRatio, setStressContrastRatio] = useState(DEFAULT_STRESS_CONTRAST_RATIO);
+    // Each stress word's IPA (optional, display only), in the field after the word: same order as
+    // stressWordList. Sent as stress_words_ipa, {"apology": "əˈpɒlədʒi"}; the analyzer splits it
+    // into syllables (each word's "syllabified") and doesn't use it for scoring.
+    const [stressIpaList, setStressIpaList] = useState<string[]>([""]);
+    // Each stress word's Vietnamese pronunciation code (optional, display only), in the field after
+    // its IPA, syllables separated by hyphens ("ơ-pô-lơ-di"): same order as stressWordList. Sent as
+    // stress_words_viet; the analyzer matches its parts to the IPA syllables.
+    const [stressVietList, setStressVietList] = useState<string[]>([""]);
+    // {word: value} as JSON text for the words at `indexes` with a value in `values`, or "".
+    const wordMapFor = (values: string[], indexes: number[]) => {
+        const pairs = indexes
+            .map((i) => [stressWordList[i]?.trim() ?? "", values[i]?.trim() ?? ""] as const)
+            .filter(([w, v]) => w && v);
+        return pairs.length > 0 ? JSON.stringify(Object.fromEntries(pairs)) : "";
+    };
     // How closely each stress word's melody (pitch shape) must follow the reference's. Higher = stricter.
     const [melodyMinSimilarity, setMelodyMinSimilarity] = useState(DEFAULT_MELODY_MIN_SIMILARITY);
     // Which syllable of each stress word should be stressed: the CMU dictionary's (the reference
@@ -250,19 +263,29 @@ export default function Shadowing() {
     );
     const sameWord = (a: string, b: string) => a.trim().toLowerCase() === b.toLowerCase();
     const isStressWord = (word: string) => stressWordList.some((w) => sameWord(w, word));
-    // Never leaves the list without a field to type in.
-    const setStressFields = (list: string[]) => setStressWordList(list.length > 0 ? list : [""]);
+    // Keeps the stress words whose index passes `keep`, with their IPA; never leaves the list
+    // without a field to type in.
+    const keepStressFields = (keep: (i: number) => boolean) => {
+        const indexes = stressWordList.map((_, i) => i).filter(keep);
+        setStressWordList(indexes.length > 0 ? indexes.map((i) => stressWordList[i]!) : [""]);
+        setStressIpaList(indexes.length > 0 ? indexes.map((i) => stressIpaList[i] ?? "") : [""]);
+        setStressVietList(indexes.length > 0 ? indexes.map((i) => stressVietList[i] ?? "") : [""]);
+    };
     // A word button puts the word in the first empty field (or a new one), or takes its field out
     // if it's already there.
     const toggleStressWord = (word: string) => {
         if (isStressWord(word)) {
-            setStressFields(stressWordList.filter((w) => !sameWord(w, word)));
+            keepStressFields((i) => !sameWord(stressWordList[i]!, word));
             return;
         }
         const blank = stressWordList.findIndex((w) => w.trim() === "");
-        setStressFields(blank >= 0
-            ? stressWordList.map((w, i) => (i === blank ? word : w))
-            : [...stressWordList, word]);
+        if (blank >= 0) {
+            setStressWordList(stressWordList.map((w, i) => (i === blank ? word : w)));
+        } else {
+            setStressWordList([...stressWordList, word]);
+            setStressIpaList([...stressWordList.map((_, i) => stressIpaList[i] ?? ""), ""]);
+            setStressVietList([...stressWordList.map((_, i) => stressVietList[i] ?? ""), ""]);
+        }
     };
     const referenceReady = reference !== null && reference.sentence === text
         && (reference.source === "s3" || reference.ssml === "" || reference.ssml === ssml.trim());
@@ -382,7 +405,7 @@ export default function Shadowing() {
 
     // Sends the reference and one stress word to VoiceAnalyzer (through Django) and keeps what it
     // measures in the reference alone: the stressed syllable, the dictionary's, and the melody.
-    const analyzeReference = async (word: string) => {
+    const analyzeReference = async (word: string, index: number) => {
         const key = word.trim().toLowerCase();
         if (!key || !reference || !referenceReady || refAnalyses[key]?.loading) return;
         const refUrl = reference.url;
@@ -393,6 +416,8 @@ export default function Shadowing() {
             form.append("sentence", reference.sentence);
             form.append("stress_words", word.trim());
             form.append("stress_source", stressSource);
+            form.append("stress_words_ipa", wordMapFor(stressIpaList, [index]));
+            form.append("stress_words_viet", wordMapFor(stressVietList, [index]));
             const res = await api.post("/api/shadowing/analyze_reference/", form);
             const data = res.data as ReferenceAnalysis;
             const result = data.words.find((w) => sameWord(w.word, word)) ?? data.words[0];
@@ -418,9 +443,11 @@ export default function Shadowing() {
         form.append("link_tolerance", String(strict ? linkTolerance : DEFAULT_LINK_TOLERANCE));
         const words = stressWords.trim();
         form.append("stress_words", words);
-        form.append("stress_contrast_ratio", String(words ? stressContrastRatio : DEFAULT_STRESS_CONTRAST_RATIO));
         form.append("melody_min_similarity", String(words ? melodyMinSimilarity : DEFAULT_MELODY_MIN_SIMILARITY));
         form.append("stress_source", stressSource);
+        const all = stressWordList.map((_, i) => i);
+        form.append("stress_words_ipa", words ? wordMapFor(stressIpaList, all) : "");
+        form.append("stress_words_viet", words ? wordMapFor(stressVietList, all) : "");
     };
 
     const recordTest = () => {
@@ -999,7 +1026,7 @@ export default function Shadowing() {
                             const shown = analysis && reference && analysis.refUrl === reference.url ? analysis : null;
                             return (
                             <div key={i} className="flex flex-col gap-1">
-                            <div className="flex items-center gap-1">
+                            <div className="flex flex-wrap items-center gap-1">
                                 <input
                                     value={word}
                                     onChange={(e) => setStressWordList(stressWordList.map((w, j) => (j === i ? e.target.value : w)))}
@@ -1010,10 +1037,29 @@ export default function Shadowing() {
                                     aria-required={i === 0}
                                     className={`bg-white border rounded-md p-2 w-56 ${stressWordsMissing ? "border-red-600" : "border-gray-400"}`}
                                 />
-                                {(stressWordList.length > 1 || word !== "") && (
+                                <input
+                                    value={stressIpaList[i] ?? ""}
+                                    onChange={(e) => setStressIpaList(stressWordList.map((_, j) => (j === i ? e.target.value : stressIpaList[j] ?? "")))}
+                                    placeholder={i === 0 ? "IPA, e.g. əˈpɒlədʒi" : "IPA (optional)"}
+                                    aria-label={`IPA of stress word ${i + 1}`}
+                                    title="The word's IPA (optional): shown split into syllables in the results. It isn't used for scoring."
+                                    spellCheck={false}
+                                    className="bg-white border border-gray-400 rounded-md p-2 w-44"
+                                />
+                                <input
+                                    value={stressVietList[i] ?? ""}
+                                    onChange={(e) => setStressVietList(stressWordList.map((_, j) => (j === i ? e.target.value : stressVietList[j] ?? "")))}
+                                    placeholder={i === 0 ? "Vietnamese, e.g. ơ-pô-lơ-di" : "Vietnamese (optional)"}
+                                    aria-label={`Vietnamese pronunciation code of stress word ${i + 1}`}
+                                    title="The word's pronunciation written the Vietnamese way (optional), one part per syllable separated by hyphens: ơ-pô-lơ-di. Shown with the IPA syllables when the number of parts matches. It isn't used for scoring."
+                                    lang="vi"
+                                    spellCheck={false}
+                                    className="bg-white border border-gray-400 rounded-md p-2 w-44"
+                                />
+                                {(stressWordList.length > 1 || word !== "" || (stressIpaList[i] ?? "") !== "" || (stressVietList[i] ?? "") !== "") && (
                                     <button
                                         type="button"
-                                        onClick={() => setStressFields(stressWordList.filter((_, j) => j !== i))}
+                                        onClick={() => keepStressFields((j) => j !== i)}
                                         aria-label={`Remove stress word ${i + 1}`}
                                         title="Remove"
                                         className="h-8 w-8 rounded-md text-lg leading-none text-gray-600 hover:bg-gray-300 hover:text-gray-900"
@@ -1023,7 +1069,7 @@ export default function Shadowing() {
                                 )}
                                 <button
                                     type="button"
-                                    onClick={() => void analyzeReference(word)}
+                                    onClick={() => void analyzeReference(word, i)}
                                     disabled={!word.trim() || !reference || !referenceReady || shown?.loading}
                                     title={!reference || !referenceReady
                                         ? "Generate (or load) the reference audio for this sentence first"
@@ -1040,26 +1086,16 @@ export default function Shadowing() {
                         })}
                         <button
                             type="button"
-                            onClick={() => setStressWordList([...stressWordList, ""])}
+                            onClick={() => {
+                                setStressWordList([...stressWordList, ""]);
+                                setStressIpaList([...stressWordList.map((_, i) => stressIpaList[i] ?? ""), ""]);
+                                setStressVietList([...stressWordList.map((_, i) => stressVietList[i] ?? ""), ""]);
+                            }}
                             className="self-start text-sm text-blue-700 hover:underline"
                         >
                             + Add a word
                         </button>
                     </fieldset>
-                    {stressWords.trim() !== "" && (
-                        <RatioSlider
-                            label="Stress contrast"
-                            hint="How much of the reference's contrast between the stressed syllable and the others (within the word) the student must reach. Lower = more lenient."
-                            value={stressContrastRatio}
-                            defaultValue={DEFAULT_STRESS_CONTRAST_RATIO}
-                            onChange={setStressContrastRatio}
-                        />
-                    )}
-                    {stressWords.trim() !== "" && (
-                        <p className="text-sm text-gray-600 self-center">
-                            Suggestion: 50–60% for beginners, 75% for most classes, 90–100% for advanced students.
-                        </p>
-                    )}
                     {stressWords.trim() !== "" && (
                         <RatioSlider
                             label="Melody match"
@@ -1243,21 +1279,19 @@ function ScoringHelp({ onClose }: { onClose: () => void }) {
             </div>
 
             <p className="rounded bg-white px-2 py-1">
-                <strong>Which way is easier?</strong> Stress contrast and Melody match: <strong>lower = more lenient</strong>.
+                <strong>Which way is easier?</strong> Melody match: <strong>lower = more lenient</strong>.
                 Linking tolerance: <strong>higher = more lenient</strong>.
             </p>
 
             <div>
                 <h5 className={h}>
-                    Word Syllables Stress Check: Stress words and Stress contrast (default{" "}
-                    {pct(DEFAULT_STRESS_CONTRAST_RATIO)})
+                    Word Syllables Stress Check: Stress words
                 </h5>
                 <p>
                     Type the multi-syllable words you want checked in <strong>Stress words</strong>, separated by
                     commas (for example “accept, apology”). Each word is checked <strong>on its own</strong>: the
                     syllables of the word are compared with each other, not with the rest of the sentence. This field
-                    is required: you can't send or score until it has at least one word. The <strong>Stress contrast</strong>{" "}
-                    slider appears once you type a word.
+                    is required: you can't send or score until it has at least one word.
                 </p>
                 <p className="mt-1">
                     <strong>Which syllable is right?</strong> With <strong>Use stress pattern from CMU dictionary</strong>{" "}
@@ -1269,34 +1303,12 @@ function ScoringHelp({ onClose }: { onClose: () => void }) {
                     syllable the reference voice made strongest is always the right one. The results table shows,
                     under <em>Expected</em>, which one decided.
                 </p>
-                <p className="mt-1">Each word is then judged in two steps:</p>
-                <ol className="ml-5 list-decimal">
-                    <li>
-                        <strong>Right syllable:</strong> the student must stress the expected syllable. If not, the
-                        word gets{" "}
-                        <em>✗ Wrong syllable</em> and 0%, with a hint like “Stress the 2nd syllable (○ ●), not the
-                        1st (● ○)”.
-                    </li>
-                    <li>
-                        <strong>Enough contrast:</strong> the other syllables must be lower and softer than the
-                        stressed one, by at least the <strong>Stress contrast</strong> percentage of the reference's
-                        difference. This covers both directions: the voice rising into the stress (“ac-” before
-                        “-CEPT”) and falling after it (“-ther” after “MO-”). If the contrast is too small, the word
-                        gets <em>↕ More contrast</em> and 50–99%, depending on how close the student came.
-                    </li>
-                </ol>
-                <p className="mt-1">Example: in the reference, “ac-” is clearly lower and softer than “-CEPT”.</p>
-                <ul className="ml-5 list-disc">
-                    <li>At 75%, the student's “ac-” must stand out from “-CEPT” at least 75% as much as the reference's does.</li>
-                    <li>At 50%, half the reference's contrast is enough.</li>
-                    <li>At 100%, the student must match the reference's contrast.</li>
-                </ul>
                 <p className="mt-1">
-                    Suggested: <strong>50–60%</strong> for beginners, <strong>75%</strong> for most classes,{" "}
-                    <strong>90–100%</strong> for advanced students. Choose words with a clear stress, and listen to
-                    the reference first, especially when it decides the stress (Yes/No questions). The word stress score
-                    counts for 45% of the overall score (pronunciation 55%). With no stress words, the overall
-                    score is pronunciation only.
+                    <strong>Stress isn't scored.</strong> For each word, the results show the expected stress pattern,
+                    the one the reference voice used and the one the student used (in green when it's the expected
+                    one, amber otherwise), so you can compare them. There's no verdict and no word stress score: the
+                    overall score is the pronunciation score. Choose words with a clear stress, and listen to the
+                    reference first, especially when it decides the stress (Yes/No questions).
                 </p>
             </div>
 
