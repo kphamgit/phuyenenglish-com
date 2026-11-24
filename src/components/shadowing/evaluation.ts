@@ -223,6 +223,9 @@ export interface ShadowingPrompt {
   shadowing_id: string;
   sentence: string;
   audio_url: string; // presigned S3 url of the reference (valid for an hour)
+  stress_words?: string[]; // lower case: the words whose melody is checked
+  connected_words?: string[]; // lower case: the targeted words, each should link to the next word
+  helper_words?: Record<string, string>; // the teacher's Helper Words by targeted word, e.g. {have: "vờ"}
 }
 
 // The melody chart's syllable labels: the IPA syllables with their stress marks ("ə", "ˈpɒ",

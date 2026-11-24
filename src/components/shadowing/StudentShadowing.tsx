@@ -4,6 +4,7 @@ import api from "../../api";
 import { useWebSocket } from "../context/WebSocketContext";
 import type { WebSocketMessageProps } from "../shared/types";
 import { EvaluationView } from "./EvaluationView";
+import { TargetedSentence } from "./TargetedSentence";
 import type { EvaluationResult, ShadowingPrompt } from "./evaluation";
 import { useRecorder } from "./useRecorder";
 
@@ -78,7 +79,13 @@ export default function StudentShadowing({ hidden = false }: { hidden?: boolean 
                 <p className="text-xs uppercase tracking-wide text-teal-700 font-semibold text-center">
                     Shadowing: listen, then repeat
                 </p>
-                <p className="text-2xl font-bold text-teal-900 leading-snug text-center">{prompt.sentence}</p>
+                <TargetedSentence
+                    sentence={prompt.sentence}
+                    stressWords={prompt.stress_words}
+                    connectedWords={prompt.connected_words}
+                    helperWords={prompt.helper_words}
+                    className="text-2xl font-bold text-teal-900 leading-loose text-center"
+                />
                 <audio src={prompt.audio_url} controls className="w-full" />
 
                 <div className="flex flex-wrap items-center justify-center gap-3">

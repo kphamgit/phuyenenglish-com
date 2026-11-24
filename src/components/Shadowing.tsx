@@ -180,6 +180,11 @@ export default function Shadowing() {
     // Scoring options, sent with the exercise (students can't change them).
     // Targeted words: word(s) that should link to the next word (e.g. "is" -> "is_a").
     const [targetedWords, setTargetedWords] = useState("");
+    // Shown to the students under each targeted word's link (e.g. "vờ" under have‿to), by the
+    // word in lower case. Kept for words removed from Targeted words, in case they come back.
+    const [helperWords, setHelperWords] = useState<Record<string, string>>({});
+    // The targeted words, each once, parsed as the analyzer does (letters and apostrophes).
+    const targetedWordList = [...new Set(targetedWords.toLowerCase().match(/[a-z']+/g) ?? [])];
     // Linking check (the service turns it on anyway when targeted words are given).
     const [strictConnectedSpeech, setStrictConnectedSpeech] = useState(false);
     // How much of the reference's falling / rising pitch the student must reach. Lower = more lenient.
@@ -435,6 +440,10 @@ export default function Shadowing() {
     const appendOptions = (form: FormData) => {
         const strict = strictConnectedSpeech || targetedWords.trim() !== "";
         form.append("targeted_words", targetedWords.trim());
+        // {word: helper word} for the current targeted words that have one.
+        form.append("helper_words", JSON.stringify(Object.fromEntries(
+            targetedWordList.flatMap((w) => (helperWords[w]?.trim() ? [[w, helperWords[w].trim()]] : [])),
+        )));
         form.append("strict_connected_speech", String(strict));
         // Hidden (paused) sliders send their defaults.
         form.append("fall_match_ratio", String(LEGACY_STRESS_ENABLED ? fallMatchRatio : DEFAULT_FALL_MATCH_RATIO));
@@ -935,16 +944,31 @@ export default function Shadowing() {
             <fieldset className="flex flex-col gap-3 rounded-md border border-gray-400 p-3">
                 <legend className="px-1 text-sm font-semibold">Scoring options</legend>
                 <div className="flex flex-wrap items-end gap-4">
-                    <label className="flex flex-col gap-1">
-                        <span className="text-sm">Targeted words (optional)</span>
-                        <input
-                            value={targetedWords}
-                            onChange={(e) => setTargetedWords(e.target.value)}
-                            placeholder="e.g. is"
-                            title="Word(s) that should link to the next word, e.g. is → is_a"
-                            className="bg-white border border-gray-400 rounded-md p-2 w-48"
-                        />
-                    </label>
+                    <div className="flex flex-col gap-2">
+                        <label className="flex flex-col gap-1">
+                            <span className="text-sm">Targeted words (optional)</span>
+                            <input
+                                value={targetedWords}
+                                onChange={(e) => setTargetedWords(e.target.value)}
+                                placeholder="e.g. is"
+                                title="Word(s) that should link to the next word, e.g. is → is_a"
+                                className="bg-white border border-gray-400 rounded-md p-2 w-48"
+                            />
+                        </label>
+                        {/* One per targeted word (optional): the students see it under that word's link. */}
+                        {targetedWordList.map((w) => (
+                            <label key={w} className="flex flex-col gap-1">
+                                <span className="text-sm">Helper Word for “{w}”</span>
+                                <input
+                                    value={helperWords[w] ?? ""}
+                                    onChange={(e) => setHelperWords((all) => ({ ...all, [w]: e.target.value }))}
+                                    placeholder="e.g. vờ"
+                                    title={`Shown to the students under the link from “${w}” to the next word`}
+                                    className="bg-white border border-gray-400 rounded-md p-2 w-48"
+                                />
+                            </label>
+                        ))}
+                    </div>
                     <label
                         className="flex items-center gap-2 self-center"
                         title={targetedWords.trim()

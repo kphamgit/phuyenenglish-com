@@ -3,6 +3,7 @@ import api from '../../api';
 import type { ChildRef } from '../TakeQuiz';
 import type { QuestionProps, ShadowingQuestionTake } from '../shared/types';
 import { EvaluationView } from '../shadowing/EvaluationView';
+import { TargetedSentence } from '../shadowing/TargetedSentence';
 import type { EvaluationResult } from '../shadowing/evaluation';
 import { useRecorder } from '../shadowing/useRecorder';
 
@@ -14,6 +15,19 @@ import { useRecorder } from '../shadowing/useRecorder';
 // first take is checked.
 
 type Assessed = EvaluationResult & { question_take: ShadowingQuestionTake };
+
+// What the sentence shows from the question's scoring options (set in the teacher app): the
+// stress words in amber, and each targeted word's link to the next word as an arch with its
+// helper word under it.
+const wordsOf = (text: unknown) => [...new Set((typeof text === 'string' ? text.toLowerCase().match(/[a-z']+/g) : null) ?? [])];
+function helperWordsOf(value: unknown): Record<string, string> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).flatMap(([k, v]) =>
+      typeof v === 'string' && v.trim() ? [[k.toLowerCase(), v.trim()]] : [],
+    ),
+  );
+}
 
 export default function ShadowingQuestion({ question, ref }: { question: QuestionProps; ref: React.Ref<ChildRef> }) {
   const { recording, converting, take, error: recorderError, record: startRecording, stop } = useRecorder();
@@ -51,13 +65,20 @@ export default function ShadowingQuestion({ question, ref }: { question: Questio
   };
 
   const showText = !question.hide_text || result !== null;
+  const options = question.scoring_options ?? {};
   const t = result?.question_take;
 
   return (
     <div className="flex flex-col gap-3">
       <p className="text-xs uppercase tracking-wide text-teal-700 font-semibold">Listen, then repeat</p>
       {showText ? (
-        <p className="text-2xl font-bold text-teal-900 leading-snug">{question.content}</p>
+        <TargetedSentence
+          sentence={question.content}
+          stressWords={wordsOf(options.stress_words)}
+          connectedWords={wordsOf(options.targeted_words)}
+          helperWords={helperWordsOf(options.helper_words)}
+          className="text-2xl font-bold text-teal-900 leading-loose"
+        />
       ) : (
         <p className="text-sm italic text-gray-600">The sentence appears after your first try. Listen carefully.</p>
       )}
