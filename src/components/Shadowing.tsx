@@ -185,8 +185,20 @@ export default function Shadowing() {
     const [helperWords, setHelperWords] = useState<Record<string, string>>({});
     // The targeted words, each once, parsed as the analyzer does (letters and apostrophes).
     const targetedWordList = [...new Set(targetedWords.toLowerCase().match(/[a-z']+/g) ?? [])];
+    // The word after `word`'s first use in the sentence (lower case), for showing its connected
+    // pair ("is" → "is_a"); null when it isn't there or is the last word.
+    const nextWordAfter = (word: string) => {
+        const words = (sentence.match(/[A-Za-z0-9]+(?:['’-][A-Za-z0-9]+)*/g) ?? []).map((w) =>
+            w.toLowerCase().replace(/’/g, "'"),
+        );
+        const i = words.indexOf(word);
+        return i >= 0 && i + 1 < words.length ? words[i + 1]! : null;
+    };
     // Linking check (the service turns it on anyway when targeted words are given).
     const [strictConnectedSpeech, setStrictConnectedSpeech] = useState(false);
+    // The linking check judges the targeted words' links, so with the box ticked it needs at least
+    // one (as in the p2p admin and phuyenenglish.net): Send and Score wait for it.
+    const targetedMissing = strictConnectedSpeech && targetedWords.trim() === "";
     // How much of the reference's falling / rising pitch the student must reach. Lower = more lenient.
     const [fallMatchRatio, setFallMatchRatio] = useState(DEFAULT_FALL_MATCH_RATIO);
     const [riseMatchRatio, setRiseMatchRatio] = useState(DEFAULT_RISE_MATCH_RATIO);
@@ -197,13 +209,18 @@ export default function Shadowing() {
     // One field per stress word; sent to the analyzer as "accept, apology".
     const [stressWordList, setStressWordList] = useState<string[]>([""]);
     const stressWords = stressWordList.map((w) => w.trim()).filter(Boolean).join(", ");
+    // A sentence sent to students must check something: connected speech (the box, with targeted
+    // words) or stress words. With neither, Send waits.
+    const nothingChecked = !strictConnectedSpeech && targetedWords.trim() === "" && stressWords === "";
     // Each stress word's IPA (optional, display only), in the field after the word: same order as
-    // stressWordList. Sent as stress_words_ipa, {"apology": "əˈpɒlədʒi"}; the analyzer splits it
-    // into syllables (each word's "syllabified") and doesn't use it for scoring.
+    // stressWordList. Sent as stress_words_ipa, {"apology": "əˈpɒlədʒi"}; it replaces the IPA the
+    // analyzer makes from the CMU dictionary, which splits it into syllables (each word's
+    // "syllabified") and doesn't use it for scoring.
     const [stressIpaList, setStressIpaList] = useState<string[]>([""]);
     // Each stress word's Vietnamese pronunciation code (optional, display only), in the field after
     // its IPA, syllables separated by hyphens ("ơ-pô-lơ-di"): same order as stressWordList. Sent as
-    // stress_words_viet; the analyzer matches its parts to the IPA syllables.
+    // stress_words_viet; it replaces the code the analyzer makes from the CMU dictionary, and the
+    // analyzer matches its parts to the IPA syllables.
     const [stressVietList, setStressVietList] = useState<string[]>([""]);
     // {word: value} as JSON text for the words at `indexes` with a value in `values`, or "".
     const wordMapFor = (values: string[], indexes: number[]) => {
@@ -258,8 +275,6 @@ export default function Shadowing() {
     const ssmlRate = ssmlText.match(PROSODY_RATE)?.[1] ?? null;
     const sentRate = ssmlRate ? 1 : rate;
     // The reference must say the sentence (and SSML, if it was made from one) that's typed now.
-    // Stress words are required to send or score (the Word Syllables Stress Check always runs).
-    const stressWordsMissing = stressWords.trim() === "";
     // The reference sentence's words, each once ("I'm", "well-known" kept whole), as pick buttons.
     const sentenceWords = Array.from(
         new Map(
@@ -468,7 +483,7 @@ export default function Shadowing() {
     };
 
     const scoreTest = async () => {
-        if (!reference || !referenceReady || !recorder.take || testing || stressWordsMissing) return;
+        if (!reference || !referenceReady || !recorder.take || testing || targetedMissing) return;
         setTesting(true);
         setTestError(null);
         try {
@@ -604,7 +619,7 @@ export default function Shadowing() {
     };
 
     const sendToStudents = async () => {
-        if (!reference || !referenceReady || sending || stressWordsMissing) return;
+        if (!reference || !referenceReady || sending || targetedMissing || nothingChecked) return;
         setSending(true);
         setError(null);
         try {
@@ -946,28 +961,53 @@ export default function Shadowing() {
                 <div className="flex flex-wrap items-end gap-4">
                     <div className="flex flex-col gap-2">
                         <label className="flex flex-col gap-1">
-                            <span className="text-sm">Targeted words (optional)</span>
+                            <span className="text-sm">
+                                Targeted words{" "}
+                                {strictConnectedSpeech || targetedWords.trim() !== "" ? (
+                                    <span className="text-red-700">(required)</span>
+                                ) : (
+                                    "(optional)"
+                                )}
+                            </span>
                             <input
                                 value={targetedWords}
                                 onChange={(e) => setTargetedWords(e.target.value)}
                                 placeholder="e.g. is"
-                                title="Word(s) that should link to the next word, e.g. is → is_a"
-                                className="bg-white border border-gray-400 rounded-md p-2 w-48"
+                                title="Word(s) that should link to the next word, e.g. is → is_a. Required when Evaluate Connected Speech is ticked."
+                                aria-required={strictConnectedSpeech}
+                                className={`bg-white border rounded-md p-2 w-48 ${targetedMissing ? "border-red-600" : "border-gray-400"}`}
                             />
                         </label>
-                        {/* One per targeted word (optional): the students see it under that word's link. */}
-                        {targetedWordList.map((w) => (
-                            <label key={w} className="flex flex-col gap-1">
-                                <span className="text-sm">Helper Word for “{w}”</span>
-                                <input
-                                    value={helperWords[w] ?? ""}
-                                    onChange={(e) => setHelperWords((all) => ({ ...all, [w]: e.target.value }))}
-                                    placeholder="e.g. vờ"
-                                    title={`Shown to the students under the link from “${w}” to the next word`}
-                                    className="bg-white border border-gray-400 rounded-md p-2 w-48"
-                                />
-                            </label>
-                        ))}
+                        <p className="m-0 max-w-xs text-xs text-gray-500">
+                            Type only the <strong>first word</strong> of each connected word pair: “is” for “is_a”.
+                            Separate several with commas (is, have).
+                        </p>
+                        {/* One line per connected word pair: the pair, then its Helper Word (optional), which
+                            the students see under that link. */}
+                        {targetedWordList.map((w) => {
+                            const next = nextWordAfter(w);
+                            return (
+                                <div key={w} className="flex flex-wrap items-center gap-2">
+                                    <span
+                                        className="min-w-24 font-mono text-sm"
+                                        title={next ? undefined : `“${w}” isn't followed by another word in the sentence`}
+                                    >
+                                        {w}_{next ?? <span className="text-gray-400">?</span>}
+                                    </span>
+                                    <label className="flex items-center gap-1">
+                                        <span className="text-sm">Helper Word</span>
+                                        <input
+                                            value={helperWords[w] ?? ""}
+                                            onChange={(e) => setHelperWords((all) => ({ ...all, [w]: e.target.value }))}
+                                            placeholder="e.g. vờ"
+                                            aria-label={`Helper Word for ${w}`}
+                                            title={`Optional: shown to the students under the link from “${w}” to the next word`}
+                                            className="bg-white border border-gray-400 rounded-md p-2 w-40"
+                                        />
+                                    </label>
+                                </div>
+                            );
+                        })}
                     </div>
                     <label
                         className="flex items-center gap-2 self-center"
@@ -1042,8 +1082,11 @@ export default function Shadowing() {
                     {/* Word Syllables Stress Check: which syllable is stressed inside each word given here. */}
                     <fieldset className="flex flex-col gap-1">
                         <legend className="mb-1 text-sm">
-                            Stress words <span className="text-red-700">(required)</span>{" "}
-                            <span className="text-gray-600">The multi-syllable words checked for syllable stress pattern.</span>
+                            Stress words (optional){" "}
+                            <span className="text-gray-600">
+                                The multi-syllable words checked for syllable stress pattern. Leave empty to test
+                                linking only.
+                            </span>
                         </legend>
                         {stressWordList.map((word, i) => {
                             const analysis = refAnalyses[word.trim().toLowerCase()];
@@ -1057,25 +1100,23 @@ export default function Shadowing() {
                                     placeholder={i === 0 ? "e.g. apology" : "another word"}
                                     aria-label={`Stress word ${i + 1}`}
                                     title="A multi-syllable word whose syllable stress is checked against the reference (Word Syllables Stress Check)."
-                                    required={i === 0}
-                                    aria-required={i === 0}
-                                    className={`bg-white border rounded-md p-2 w-56 ${stressWordsMissing ? "border-red-600" : "border-gray-400"}`}
+                                    className="bg-white border border-gray-400 rounded-md p-2 w-56"
                                 />
                                 <input
                                     value={stressIpaList[i] ?? ""}
                                     onChange={(e) => setStressIpaList(stressWordList.map((_, j) => (j === i ? e.target.value : stressIpaList[j] ?? "")))}
-                                    placeholder={i === 0 ? "IPA, e.g. əˈpɒlədʒi" : "IPA (optional)"}
+                                    placeholder={i === 0 ? "IPA (auto), e.g. əˈpɒlədʒi" : "IPA (auto)"}
                                     aria-label={`IPA of stress word ${i + 1}`}
-                                    title="The word's IPA (optional): shown split into syllables in the results. It isn't used for scoring."
+                                    title="Optional: leave empty to use the American IPA made from the CMU dictionary (click Analyze reference audio to see it). Type one here to replace it, with ˈ before the stressed syllable, e.g. əˈpɒlədʒi. Shown split into syllables in the results; it isn't used for scoring."
                                     spellCheck={false}
                                     className="bg-white border border-gray-400 rounded-md p-2 w-44"
                                 />
                                 <input
                                     value={stressVietList[i] ?? ""}
                                     onChange={(e) => setStressVietList(stressWordList.map((_, j) => (j === i ? e.target.value : stressVietList[j] ?? "")))}
-                                    placeholder={i === 0 ? "Vietnamese, e.g. ơ-pô-lơ-di" : "Vietnamese (optional)"}
+                                    placeholder={i === 0 ? "Vietnamese (auto), e.g. ơ-pô-lơ-di" : "Vietnamese (auto)"}
                                     aria-label={`Vietnamese pronunciation code of stress word ${i + 1}`}
-                                    title="The word's pronunciation written the Vietnamese way (optional), one part per syllable separated by hyphens: ơ-pô-lơ-di. Shown with the IPA syllables when the number of parts matches. It isn't used for scoring."
+                                    title="Optional: leave empty to use the Vietnamese pronunciation code made from the CMU dictionary (click Analyze reference audio to see it). Type one here to replace it: one part per syllable, separated by hyphens (ơ-pô-lơ-di). Shown with the IPA syllables in the results; it isn't used for scoring."
                                     lang="vi"
                                     spellCheck={false}
                                     className="bg-white border border-gray-400 rounded-md p-2 w-44"
@@ -1176,15 +1217,24 @@ export default function Shadowing() {
                 <div className="flex flex-wrap items-center gap-3">
                     <button
                         onClick={() => void sendToStudents()}
-                        disabled={!referenceReady || sending || stressWordsMissing}
+                        disabled={!referenceReady || sending || targetedMissing || nothingChecked}
                         className={`text-white bg-green-600 p-2 rounded-md hover:bg-green-800 ${
-                            !referenceReady || sending || stressWordsMissing ? "opacity-50 cursor-not-allowed" : ""
+                            !referenceReady || sending || targetedMissing || nothingChecked ? "opacity-50 cursor-not-allowed" : ""
                         }`}
                     >
                         {sending ? "Sending…" : "Send to Students"}
                     </button>
-                    {stressWordsMissing && <span className="text-sm text-red-700">Type the stress words first.</span>}
                     {!referenceReady && <span className="text-sm text-gray-600">Choose or generate the reference first.</span>}
+                    {targetedMissing && (
+                        <span className="text-sm text-red-700">
+                            Evaluate Connected Speech is on: type at least one targeted word, or untick it.
+                        </span>
+                    )}
+                    {nothingChecked && (
+                        <span className="text-sm text-red-700">
+                            Nothing to check yet: type targeted words (Connected Speech) or stress words (Scoring options).
+                        </span>
+                    )}
                 </div>
                 <p className="text-xs text-[#5C3A1E]">
                     Reference audio will be sent to S3 directory:{" "}
@@ -1227,12 +1277,16 @@ export default function Shadowing() {
                         <audio key={recorder.take.url} src={recorder.take.url} controls className="min-w-0 flex-1" />
                         <button
                             onClick={() => void scoreTest()}
-                            disabled={!referenceReady || testing || stressWordsMissing}
+                            disabled={!referenceReady || testing || targetedMissing}
                             className="px-4 py-2 rounded-md bg-teal-600 hover:bg-teal-700 text-white font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             {testing ? "Scoring…" : "Score my recording"}
                         </button>
-                        {stressWordsMissing && <span className="text-sm text-red-700">Type the stress words first (Scoring options).</span>}
+                        {targetedMissing && (
+                            <span className="text-sm text-red-700">
+                                Type at least one targeted word (Scoring options), or untick Evaluate Connected Speech.
+                            </span>
+                        )}
                     </div>
                 )}
                 {(recorder.error ?? testError) && (
@@ -1315,7 +1369,7 @@ function ScoringHelp({ onClose }: { onClose: () => void }) {
                     Type the multi-syllable words you want checked in <strong>Stress words</strong>, separated by
                     commas (for example “accept, apology”). Each word is checked <strong>on its own</strong>: the
                     syllables of the word are compared with each other, not with the rest of the sentence. This field
-                    is required: you can't send or score until it has at least one word.
+                    is optional: leave it empty when the sentence only tests linking (no stress check is made then).
                 </p>
                 <p className="mt-1">
                     <strong>Which syllable is right?</strong> With <strong>Use stress pattern from CMU dictionary</strong>{" "}
@@ -1413,8 +1467,9 @@ function ScoringHelp({ onClose }: { onClose: () => void }) {
                 <h5 className={h}>Linking tolerance (default {DEFAULT_LINK_TOLERANCE}×, shown when Strict connected speech is on)</h5>
                 <p>
                     Checks that words the reference speaker joins smoothly (“is_a”, “mother_is”) are joined by the
-                    student too, without a pause. With targeted words, only those words and the next word are
-                    checked. Otherwise every pair the reference links is checked.
+                    student too, without a pause. Only the targeted words and the word after each are checked, so
+                    with Evaluate Connected Speech ticked you need at least one targeted word: Send and Score wait
+                    until there is one.
                 </p>
                 <p className="mt-1">The number is how much longer a pause between linked words may be than the reference's:</p>
                 <ul className="ml-5 list-disc">

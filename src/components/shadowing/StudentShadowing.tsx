@@ -91,6 +91,8 @@ export default function StudentShadowing({ prompt, hidden = false }: { prompt: S
                     stressWords={prompt.stress_words}
                     connectedWords={prompt.connected_words}
                     helperWords={prompt.helper_words}
+                    sentenceViet={prompt.sentence_viet}
+                    sentenceVietWords={prompt.sentence_viet_words}
                     className="text-2xl font-bold text-teal-900 leading-loose text-center"
                 />
                 <audio src={prompt.audio_url} controls className="w-full" />

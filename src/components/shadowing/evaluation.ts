@@ -119,10 +119,12 @@ export interface Syllabified {
   syllables: { text: string; stress: 'primary' | 'secondary' | null; viet?: string }[];
   cmu_syllable_count: number | null;
   matches_cmu: boolean | null;
-  // The Vietnamese pronunciation code the teacher typed (e.g. "ơ-pô-lơ-di"), split at the hyphens,
-  // and whether it has one part per IPA syllable (null: no code or no syllables). Missing on
+  // The Vietnamese pronunciation code (e.g. "ơ-pô-lơ-di"): the one the teacher typed (viet_source
+  // "client"), else made from the CMU dictionary ("cmu"); its parts one per IPA syllable when
+  // viet_matches_ipa, else split at every hyphen (null: no code or no syllables). Missing on
   // results from before the field existed.
   viet?: string | null;
+  viet_source?: 'client' | 'cmu' | null;
   viet_syllables?: string[];
   viet_matches_ipa?: boolean | null;
 }
@@ -226,6 +228,23 @@ export interface ShadowingPrompt {
   stress_words?: string[]; // lower case: the words whose melody is checked
   connected_words?: string[]; // lower case: the targeted words, each should link to the next word
   helper_words?: Record<string, string>; // the teacher's Helper Words by targeted word, e.g. {have: "vờ"}
+  // The Vietnamese pronunciation code of every word of the sentence, by word in lower case
+  // (e.g. {turn: "t(h)ơ(r)n", it: "ít"}); words not in the CMU dictionary are missing.
+  sentence_viet?: Record<string, string>;
+  // The same codes ONE PER WORD POSITION, in sentence order (words are runs of letters and
+  // apostrophes), with spaCy's part of speech: the same spelling can get two codes, e.g. "They
+  // record (verb) the record (noun)". Preferred over sentence_viet when present.
+  sentence_viet_words?: VietWord[];
+}
+
+// One word of sentence_viet_words: the word as written, spaCy's tag (e.g. "VERB"), its
+// Vietnamese code (null when there's none), and where the code came from: the word's saved
+// viet_pron_code in the dictionary, or made on the fly (not in the dictionary).
+export interface VietWord {
+  word: string;
+  pos: string | null;
+  code: string | null;
+  from?: 'dictionary' | 'generated';
 }
 
 // The melody chart's syllable labels: the IPA syllables with their stress marks ("ə", "ˈpɒ",

@@ -4,6 +4,7 @@ import {
   LEGACY_STRESS_ENABLED,
   RISING_TONE_ENABLED,
   type EvaluationResult,
+  type EvaluationWord,
   type PitchDirection,
   type StressComparison,
   chartLabels,
@@ -193,6 +194,42 @@ function WordStressTable({ words, teacher = false }: { words: WordStress[]; teac
   );
 }
 
+// The student's screen: whether each targeted word was linked to the next word (make‿it), from
+// VoiceAnalyzer's linking_to_next_word: "Linked (...)", or "Missed Link" / "Unlinked" / "Separated"
+// when the student said the two words apart. Only the targeted pairs: they're the links the student
+// was asked for (the sentence shows them with arches).
+function LinkingList({ words, targeted }: { words: EvaluationWord[]; targeted: string[] }) {
+  const bareWord = (w: string) => w.replace(/[^A-Za-z']/g, '').toLowerCase();
+  const targetedSet = new Set(targeted.map(bareWord));
+  const pairs = words.flatMap((w, i) => {
+    if (!targetedSet.has(bareWord(w.word)) || i + 1 >= words.length) return [];
+    const status = w.linking_to_next_word ?? '';
+    const ok = /^Linked/.test(status) ? true : /^(Missed Link|Unlinked|Separated)/.test(status) ? false : undefined;
+    return [{ first: w.word, second: words[i + 1].word, ok }];
+  });
+  if (pairs.length === 0) return null;
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="font-semibold text-gray-700">Linking</div>
+      {pairs.map((p, i) => (
+        <div key={i} className="flex items-center gap-2">
+          <span className="rounded bg-sky-100 px-1 font-semibold">
+            {p.first}‿{p.second}
+          </span>
+          <Verdict ok={p.ok} />
+          <span className={p.ok === false ? 'text-red-600' : 'text-gray-600'}>
+            {p.ok === true
+              ? 'Linked smoothly'
+              : p.ok === false
+                ? 'Not linked: say the two words together, as one word'
+                : 'Not checked'}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // The student's screen: only the melody of each stress word (the badge and both pitch curves, no
 // advice text), without the stress check (stressed syllable, contrast, score), which the teacher sees.
 function WordMelodyList({ words }: { words: WordStress[] }) {
@@ -245,9 +282,10 @@ export function Spelled({ parts, stressed }: { parts: string[]; stressed: number
 }
 
 // A stress word's IPA in syllables, e.g. /ə-ˈpɒ-lə-dʒi/ with the primary-stressed syllable in bold,
-// and where it came from: the IPA the teacher typed, or the dictionary (US). Warns when its
-// syllables don't match the count the analyzer measured. The Vietnamese code the teacher typed
-// (ơ-pô-lơ-di) goes on top, dark, with the IPA lighter under it. Compact: smaller, for a table cell.
+// and where it came from: the IPA the teacher typed, or made from the CMU dictionary (US). Warns
+// when its syllables don't match the count the analyzer measured. The Vietnamese code (ơ-pô-lơ-di:
+// the teacher's, or made from the CMU dictionary) goes on top, dark, with the IPA lighter under
+// it. Compact: smaller, for a table cell.
 export function IpaSyllables({ syllabified: s, compact = false }: { syllabified: Syllabified; compact?: boolean }) {
   if (!s.syllables?.length) {
     return s.ipa ? (
@@ -262,7 +300,11 @@ export function IpaSyllables({ syllabified: s, compact = false }: { syllabified:
     <div className={`${compact ? 'text-[11px]' : 'text-xs'} whitespace-normal`}>
       {s.viet && (
         <div className="text-gray-900" lang="vi">
-          {!compact && <span className="text-gray-600">Vietnamese: </span>}
+          {!compact && (
+            <span className="text-gray-600">
+              Vietnamese ({s.viet_source === 'client' ? 'yours' : 'made from the CMU dictionary'}):{' '}
+            </span>
+          )}
           {s.viet_matches_ipa ? (
             vietParts.map((p, i) => (
               <Fragment key={i}>
@@ -274,8 +316,9 @@ export function IpaSyllables({ syllabified: s, compact = false }: { syllabified:
             <>
               {s.viet}{' '}
               <span className="text-amber-700">
-                ({vietParts.length} part{vietParts.length === 1 ? '' : 's'}, but the IPA has {s.syllables.length}{' '}
-                syllable{s.syllables.length === 1 ? '' : 's'})
+                (its parts don't line up with the {s.syllables.length} IPA syllable
+                {s.syllables.length === 1 ? '' : 's'}
+                {s.viet_source === 'client' ? ': use one part per syllable, separated by hyphens' : ''})
               </span>
             </>
           )}
@@ -297,12 +340,15 @@ export function IpaSyllables({ syllabified: s, compact = false }: { syllabified:
         ))}
         /
       </span>{' '}
-      <span>({s.source === 'ipa' ? 'your IPA' : 'dictionary, US'})</span>
+      <span>
+        ({s.source === 'ipa' ? 'your IPA' : compact ? 'dictionary, US' : 'made from the CMU dictionary, US: type one to replace it'})
+      </span>
       </div>
       {s.matches_cmu === false && (
         <div className="text-amber-700">
-          {s.syllable_count} syllable{s.syllable_count === 1 ? '' : 's'} here, but the check measured{' '}
-          {s.cmu_syllable_count} (the dictionary's count).
+          {s.source === 'ipa' ? 'Your IPA has' : 'This IPA has'} {s.syllable_count} syllable
+          {s.syllable_count === 1 ? '' : 's'}, but the analyzer splits this word into {s.cmu_syllable_count} (the CMU
+          dictionary's count), so the labels won't line up with the melody chart and students won't see them there.
         </div>
       )}
     </div>
@@ -586,7 +632,8 @@ export function ContourChart({
 // teacher: the teacher's view (Test it yourself, the students' results), with teacher-only wording.
 // hideOverall: leave out the overall score (the students' results, which show the melody score instead).
 // student: the student's screen, only the whole-sentence table (words, without the ARPAbet / IPA
-// sounds) and the melody of each stress word (WordMelodyList); the stress check is teacher-only.
+// sounds), the linking of each targeted pair (LinkingList) and the melody of each stress word
+// (WordMelodyList); the stress check is teacher-only.
 export function EvaluationView({
   result: r,
   teacher = false,
@@ -716,6 +763,7 @@ export function EvaluationView({
     return (
       <div className="flex flex-col gap-3">
         {sentenceTable}
+        {linking && <LinkingList words={words} targeted={s.targeted_words ?? []} />}
         {ws && <WordMelodyList words={ws.words} />}
       </div>
     );

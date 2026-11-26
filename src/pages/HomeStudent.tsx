@@ -332,7 +332,11 @@ function HomeStudent() {
         }
         else if (data.message_type === "shadowing_prompt") {
             // A new Shadowing exercise (shown by StudentShadowing in Playground).
-            arrive("shadowing", { shadowing: data.content as ShadowingPrompt });
+            const shadowing = data.content as ShadowingPrompt;
+            // The Vietnamese pronunciation code of each word, from Django (sentence_viet).
+            console.log("HomeStudent: shadowing sentence_viet:", shadowing.sentence_viet ?? "(none sent)");
+            if (shadowing.sentence_viet) console.table(shadowing.sentence_viet);
+            arrive("shadowing", { shadowing });
             chimeAudioRef.current?.play().catch(() => {});
         }
         else if (data.message_type === "live_quiz_terminated") {

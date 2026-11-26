@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import type { VietWord } from './evaluation';
 
 // The sentence the students repeat, with the words the teacher checks marked: the stress words
 // (their melody is checked) in amber, and each connected (targeted) word linked to the
@@ -42,6 +43,16 @@ const lastLetterIndex = (token: string) => {
 
 const linkEndIndex = (token: string) => [...token].findIndex(isLetter);
 
+// For the Vietnamese codes: any letter (ơ, ờ, í, ...), and no silent e, so the arch simply goes
+// from the code's last letter to the next code's first letter ("t(h)ơ(r)n‿ít": the n to the í).
+const isAnyLetter = (ch: string) => /\p{L}/u.test(ch);
+const lastAnyLetterIndex = (token: string) => {
+  const chars = [...token];
+  for (let i = chars.length - 1; i >= 0; i--) if (isAnyLetter(chars[i])) return i;
+  return -1;
+};
+const firstAnyLetterIndex = (token: string) => [...token].findIndex(isAnyLetter);
+
 const stressClass = 'text-amber-600';
 
 interface Arch {
@@ -59,12 +70,16 @@ function LinkedText({
   linksNext,
   linkSounds = [],
   stress,
+  viet = false,
+  muted = [],
   className = '',
 }: {
   tokens: string[];
   linksNext: boolean[];
   linkSounds?: (string | undefined)[]; // linkSounds[i]: shown under the arch from token i
   stress: Set<string>;
+  viet?: boolean; // the tokens are Vietnamese codes: no silent e, any letter can carry an arch
+  muted?: boolean[]; // muted[i]: token i is shown in grey italics (a word without a code)
   className?: string;
 }) {
   const container = useRef<HTMLSpanElement>(null);
@@ -104,8 +119,8 @@ function LinkedText({
   const add = (m: Map<string, number[]>, key: string, k: number) => m.set(key, [...(m.get(key) ?? []), k]);
   tokens.forEach((t, i) => {
     if (!linksNext[i]) return;
-    const from = linkStartIndex(t);
-    const to = linkEndIndex(tokens[i + 1]);
+    const from = viet ? lastAnyLetterIndex(t) : linkStartIndex(t);
+    const to = viet ? firstAnyLetterIndex(tokens[i + 1]) : linkEndIndex(tokens[i + 1]);
     if (from < 0 || to < 0) return;
     add(starts, `${i}:${from}`, i);
     add(ends, `${i + 1}:${to}`, i);
@@ -114,7 +129,7 @@ function LinkedText({
   // A token, with the letters an arch starts or ends at in their own spans, and the silent e of a
   // word linked to the next one dimmed (the arch skips it: make‿it).
   const renderToken = (t: string, i: number) => {
-    const silentE = linksNext[i] && hasSilentE(t) ? lastLetterIndex(t) : -1;
+    const silentE = !viet && linksNext[i] && hasSilentE(t) ? lastLetterIndex(t) : -1;
     const content = [...t].map((ch, c) => {
       const from = starts.get(`${i}:${c}`);
       const to = ends.get(`${i}:${c}`);
@@ -132,6 +147,7 @@ function LinkedText({
         </span>
       );
     });
+    if (muted[i]) return <span className="text-gray-400 italic">{content}</span>;
     return stress.has(bare(t)) ? <span className={stressClass}>{content}</span> : <>{content}</>;
   };
 
@@ -182,11 +198,61 @@ function LinkedText({
   );
 }
 
+// The sentence in Vietnamese pronunciation codes, word for word: each word replaced by its code
+// (punctuation kept), and a word without a code shown as it is, in grey. The linked words get the
+// same arches (and blue background) as in the English sentence, from code to code, each with the
+// teacher's Helper Word under it.
+// `words` (one code per word position, in order) is used when given: the n-th word on screen
+// takes the n-th entry, so "record" (verb) and "record" (noun) each show their own code. A word
+// whose entry doesn't match (a different sentence) falls back to `codes`, by spelling.
+function VietSentence({
+  tokens,
+  linksNext,
+  linkSounds,
+  codes,
+  words,
+}: {
+  tokens: string[];
+  linksNext: boolean[];
+  linkSounds: (string | undefined)[];
+  codes: Record<string, string>;
+  words?: VietWord[];
+}) {
+  const key = (w: string) => w.toLowerCase().replace(/^'+|'+$/g, '');
+  let position = 0; // the word's position in the sentence, counted across tokens
+  const codeOf = (w: string) => {
+    const entry = words?.[position++];
+    if (entry && key(entry.word) === key(w)) return entry.code?.trim() || undefined;
+    return codes[key(w)]?.trim() || undefined;
+  };
+  // Each token with its words replaced by their codes. NFC keeps each accented letter one
+  // character, so an arch's letter span never splits a letter from its accent.
+  const muted: boolean[] = [];
+  const vietTokens = tokens.map((t, i) =>
+    t
+      .split(/([A-Za-z']+)/)
+      .map((part, k) => {
+        if (k % 2 === 0) return part; // the punctuation around the words
+        const code = codeOf(part);
+        if (!code) muted[i] = true;
+        return code ? code.normalize('NFC') : part;
+      })
+      .join(''),
+  );
+  return (
+    <p className="text-center text-lg leading-loose text-teal-700" title="Vietnamese pronunciation code">
+      <LinkedText tokens={vietTokens} linksNext={linksNext} linkSounds={linkSounds} stress={new Set()} viet muted={muted} />
+    </p>
+  );
+}
+
 export function TargetedSentence({
   sentence,
   stressWords = [],
   connectedWords = [],
   helperWords = {},
+  sentenceViet,
+  sentenceVietWords,
   className = '',
 }: {
   sentence: string;
@@ -195,6 +261,12 @@ export function TargetedSentence({
   // The teacher's Helper Words, by targeted word in lower case: each is shown under that word's
   // link (e.g. {have: "vờ"}). A link without one shows no word.
   helperWords?: Record<string, string>;
+  // The Vietnamese pronunciation code of each word, by word in lower case: when given, the
+  // sentence in codes is shown under it.
+  sentenceViet?: Record<string, string>;
+  // The same codes one per word position, in order (the part of speech from the context), so
+  // the same spelling can show two codes. Preferred over sentenceViet when given.
+  sentenceVietWords?: VietWord[];
   className?: string;
 }) {
   const stress = new Set(stressWords.map((w) => w.toLowerCase()));
@@ -214,6 +286,9 @@ export function TargetedSentence({
       <p className={className}>
         <LinkedText tokens={tokens} linksNext={linksNext} linkSounds={linkSounds} stress={stress} />
       </p>
+      {((sentenceVietWords?.some((w) => w.code)) || (sentenceViet && Object.keys(sentenceViet).length > 0)) && (
+        <VietSentence tokens={tokens} linksNext={linksNext} linkSounds={linkSounds} codes={sentenceViet ?? {}} words={sentenceVietWords} />
+      )}
       {(shownStress.length > 0 || linkPairs.length > 0) && (
         <div className="flex flex-col gap-1 text-sm text-gray-700">
           {shownStress.length > 0 && (
