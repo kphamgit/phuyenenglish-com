@@ -1302,6 +1302,13 @@ export default function Shadowing() {
                         >
                             {savingTest ? "Saving…" : savedFolder ? "Saved" : "Save to S3"}
                         </button>
+                        <button
+                            onClick={() => downloadRecording(scoredWith.recording, scoredWith.sentence)}
+                            title="Download the recording you scored, as a WAV file"
+                            className="px-4 py-2 rounded-md bg-gray-600 hover:bg-gray-700 text-white"
+                        >
+                            Download WAV
+                        </button>
                         {savedFolder ? (
                             <span className="text-sm text-gray-700">
                                 Saved as <code className="bg-white px-1 rounded select-all">{savedFolder}</code>
@@ -1587,3 +1594,15 @@ function RatioSlider({
 
 // The small SSML helper buttons.
 const ssmlButton = "text-sm text-gray-700 bg-gray-300 px-2 py-0.5 rounded-md hover:bg-gray-400";
+
+// Saves the teacher's scored test recording (already a 16 kHz mono WAV) to the computer, named
+// after the sentence with "-my-recording" (e.g. "turn-it-off-my-recording.wav"), so it isn't
+// mistaken for the reference's WAV.
+function downloadRecording(wav: Blob, sentence: string) {
+    const url = URL.createObjectURL(wav);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = wavFileName(sentence).replace(/\.wav$/, "-my-recording.wav");
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
