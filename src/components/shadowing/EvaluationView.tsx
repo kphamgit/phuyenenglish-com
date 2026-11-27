@@ -908,8 +908,8 @@ export function EvaluationView({
           {RISING_TONE_ENABLED && <>rising {ratio(s.rise_match_ratio)} · </>}
           {linking ? (
             <>
-              strict linking{s.strict_connected_speech == null ? ' –' : ' on'} · linking tolerance{' '}
-              {s.link_tolerance == null ? '–' : `${s.link_tolerance}×`}
+              strict linking{s.strict_connected_speech == null ? ' –' : ' on'}
+              {s.link_tolerance != null && <> · linking tolerance {s.link_tolerance}×</>}
             </>
           ) : (
             'linking not checked'

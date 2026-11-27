@@ -3,12 +3,10 @@ import api from "../api";
 import { toast } from "react-toastify";
 import {
     DEFAULT_FALL_MATCH_RATIO,
-    DEFAULT_LINK_TOLERANCE,
     DEFAULT_RISE_MATCH_RATIO,
     DEFAULT_MELODY_MIN_SIMILARITY,
     DEFAULT_STRESS_SOURCE,
     LEGACY_STRESS_ENABLED,
-    LINK_PAUSE_MARGIN_MS,
     RISING_TONE_ENABLED,
     type EvaluationResult,
     type StressSource,
@@ -202,8 +200,6 @@ export default function Shadowing() {
     // How much of the reference's falling / rising pitch the student must reach. Lower = more lenient.
     const [fallMatchRatio, setFallMatchRatio] = useState(DEFAULT_FALL_MATCH_RATIO);
     const [riseMatchRatio, setRiseMatchRatio] = useState(DEFAULT_RISE_MATCH_RATIO);
-    // How much longer a pause between linked words may be than the reference's. Higher = more lenient.
-    const [linkTolerance, setLinkTolerance] = useState(DEFAULT_LINK_TOLERANCE);
     // Word Syllables Stress Check: the multi-syllable words to check (blank = no stress check),
     // and how much of the reference's stressed/unstressed contrast the student must reach.
     // One field per stress word; sent to the analyzer as "accept, apology".
@@ -212,6 +208,10 @@ export default function Shadowing() {
     // A sentence sent to students must check something: connected speech (the box, with targeted
     // words) or stress words. With neither, Send waits.
     const nothingChecked = !strictConnectedSpeech && targetedWords.trim() === "" && stressWords === "";
+    // The linking check doesn't use the reference voice, so a connected-speech-only exercise
+    // (targeted words, no stress words) can be sent without one; the students then have nothing to
+    // listen to.
+    const connectedSpeechOnly = targetedWords.trim() !== "" && stressWords === "";
     // Each stress word's IPA (optional, display only), in the field after the word: same order as
     // stressWordList. Sent as stress_words_ipa, {"apology": "əˈpɒlədʒi"}; it replaces the IPA the
     // analyzer makes from the CMU dictionary, which splits it into syllables (each word's
@@ -240,7 +240,7 @@ export default function Shadowing() {
     const [refAnalyses, setRefAnalyses] = useState<Record<string, {
         refUrl: string; loading: boolean; result?: ReferenceWordAnalysis; error?: string;
     }>>({});
-    // The scoring options' help (opened with the Help button next to the stress options).
+    // The scoring options' help (opened with the Help button under the Connected Speech and Word Stress sections).
     const [showHelp, setShowHelp] = useState(false);
 
     // The exercise last sent from this page (reloads the results list).
@@ -255,7 +255,8 @@ export default function Shadowing() {
     // What the last score was made from (the files and the options as sent), so "Save to S3"
     // keeps exactly that even if the sliders are moved afterwards.
     const [scoredWith, setScoredWith] = useState<{
-        reference: Blob; recording: Blob; sentence: string; voice: string; tts: TtsInfo; options: [string, string][];
+        // reference null: a connected-speech-only test scored without one
+        reference: Blob | null; recording: Blob; sentence: string; voice: string; tts: TtsInfo | null; options: [string, string][];
     } | null>(null);
     const [savingTest, setSavingTest] = useState(false);
     const [savedFolder, setSavedFolder] = useState<string | null>(null);
@@ -463,8 +464,6 @@ export default function Shadowing() {
         // Hidden (paused) sliders send their defaults.
         form.append("fall_match_ratio", String(LEGACY_STRESS_ENABLED ? fallMatchRatio : DEFAULT_FALL_MATCH_RATIO));
         form.append("rise_match_ratio", String(RISING_TONE_ENABLED ? riseMatchRatio : DEFAULT_RISE_MATCH_RATIO));
-        // The slider is hidden when strict is off (linking isn't checked then), so its value isn't sent.
-        form.append("link_tolerance", String(strict ? linkTolerance : DEFAULT_LINK_TOLERANCE));
         const words = stressWords.trim();
         form.append("stress_words", words);
         form.append("melody_min_similarity", String(words ? melodyMinSimilarity : DEFAULT_MELODY_MIN_SIMILARITY));
@@ -482,26 +481,30 @@ export default function Shadowing() {
         void recorder.record();
     };
 
+    // Test it yourself needs the reference, except for a connected-speech-only test (see
+    // connectedSpeechOnly): then the recording is scored without one.
+    const canTest = referenceReady || (connectedSpeechOnly && text !== "");
     const scoreTest = async () => {
-        if (!reference || !referenceReady || !recorder.take || testing || targetedMissing) return;
+        if (!canTest || !recorder.take || testing || targetedMissing) return;
         setTesting(true);
         setTestError(null);
         try {
+            const ref = reference && referenceReady ? reference : null;
             const form = new FormData();
-            form.append("reference_file", reference.blob, "reference.mp3");
+            if (ref) form.append("reference_file", ref.blob, "reference.mp3");
             form.append("recorded_file", recorder.take.wav, "recording.wav");
-            form.append("sentence", reference.sentence);
+            form.append("sentence", ref ? ref.sentence : text);
             const options = new FormData();
             appendOptions(options);
             for (const [k, v] of options) form.append(k, v);
             const res = await api.post("/api/shadowing/test/", form);
             setTestResult(res.data as EvaluationResult);
             setScoredWith({
-                reference: reference.blob,
+                reference: ref?.blob ?? null,
                 recording: recorder.take.wav,
-                sentence: reference.sentence,
-                voice: reference.voice,
-                tts: reference.tts,
+                sentence: ref ? ref.sentence : text,
+                voice: ref?.voice ?? "",
+                tts: ref?.tts ?? null,
                 options: [...options].map(([k, v]) => [k, String(v)]),
             });
             setSavedFolder(null);
@@ -522,11 +525,11 @@ export default function Shadowing() {
         setTestError(null);
         try {
             const form = new FormData();
-            form.append("reference_file", scoredWith.reference, "reference.mp3");
+            if (scoredWith.reference) form.append("reference_file", scoredWith.reference, "reference.mp3");
             form.append("recorded_file", scoredWith.recording, "recording.wav");
             form.append("sentence", scoredWith.sentence);
             form.append("voice", scoredWith.voice);
-            appendTts(form, scoredWith.tts);
+            if (scoredWith.tts) appendTts(form, scoredWith.tts);
             for (const [k, v] of scoredWith.options) form.append(k, v);
             form.append("evaluation", JSON.stringify(testResult));
             const res = await api.post("/api/shadowing/save_test/", form);
@@ -618,16 +621,22 @@ export default function Shadowing() {
         }
     };
 
+    // With a reference: it's sent too. Without one (connected speech only): just the sentence.
+    const canSend = (referenceReady || (connectedSpeechOnly && text !== "")) && !targetedMissing && !nothingChecked;
     const sendToStudents = async () => {
-        if (!reference || !referenceReady || sending || targetedMissing || nothingChecked) return;
+        if (!canSend || sending) return;
         setSending(true);
         setError(null);
         try {
             const form = new FormData();
-            form.append("reference_file", reference.blob, "reference.mp3");
-            form.append("sentence", reference.sentence);
-            form.append("voice", reference.voice);
-            appendTts(form, reference.tts);
+            if (reference && referenceReady) {
+                form.append("reference_file", reference.blob, "reference.mp3");
+                form.append("sentence", reference.sentence);
+                form.append("voice", reference.voice);
+                appendTts(form, reference.tts);
+            } else {
+                form.append("sentence", text);
+            }
             appendOptions(form);
             const res = await api.post("/api/shadowing/send/", form);
             setSentId(res.data.shadowing_id);
@@ -955,9 +964,14 @@ export default function Shadowing() {
                 )}
             </fieldset>
 
-            {/* Scoring options (used by Send to Students and Test it yourself) */}
+            {/* Scoring options (used by Send to Students and Test it yourself), in two sections:
+                Connected Speech (the student's recording only) and Word Stress (uses the reference). */}
             <fieldset className="flex flex-col gap-3 rounded-md border border-gray-400 p-3">
-                <legend className="px-1 text-sm font-semibold">Scoring options</legend>
+                <legend className="px-1 text-sm font-semibold">Connected Speech</legend>
+                <p className="m-0 rounded bg-sky-50 px-2 py-1 text-sm text-sky-900">
+                    Connected speech is checked in the <strong>student's recording only</strong>: the reference
+                    voice isn't used. Each targeted word must link to the next word without a pause.
+                </p>
                 <div className="flex flex-wrap items-end gap-4">
                     <div className="flex flex-col gap-2">
                         <label className="flex flex-col gap-1">
@@ -1023,11 +1037,11 @@ export default function Shadowing() {
                         />
                         Strict connected speech
                     </label>
-                    {/* Only matters when missed links are penalised (strict on, or targeted words given). */}
-                    {(strictConnectedSpeech || targetedWords.trim() !== "") && (
-                        <LinkToleranceSlider value={linkTolerance} onChange={setLinkTolerance} />
-                    )}
                 </div>
+            </fieldset>
+
+            <fieldset className="flex flex-col gap-3 rounded-md border border-gray-400 p-3">
+                <legend className="px-1 text-sm font-semibold">Word Stress</legend>
                 {/* Where the right stressed syllable of each stress word comes from. */}
                 <div role="radiogroup" aria-label="Stress pattern source" className="flex flex-wrap items-center gap-x-5 gap-y-1 text-sm">
                     {([
@@ -1198,18 +1212,22 @@ export default function Shadowing() {
                             onChange={setRiseMatchRatio}
                         />
                     )}
-                    <button
-                        type="button"
-                        onClick={() => setShowHelp((v) => !v)}
-                        aria-expanded={showHelp}
-                        aria-controls="scoring-help"
-                        className="px-3 py-1.5 rounded-md border border-blue-600 text-blue-700 hover:bg-blue-50 text-sm"
-                    >
-                        {showHelp ? "Hide help" : "Help"}
-                    </button>
                 </div>
-                {showHelp && <ScoringHelp onClose={() => setShowHelp(false)} />}
             </fieldset>
+
+            {/* Help for both sections above. */}
+            <div className="flex flex-col gap-2">
+                <button
+                    type="button"
+                    onClick={() => setShowHelp((v) => !v)}
+                    aria-expanded={showHelp}
+                    aria-controls="scoring-help"
+                    className="self-start px-3 py-1.5 rounded-md border border-blue-600 text-blue-700 hover:bg-blue-50 text-sm"
+                >
+                    {showHelp ? "Hide help" : "Help: Connected Speech and Word Stress"}
+                </button>
+                {showHelp && <ScoringHelp onClose={() => setShowHelp(false)} />}
+            </div>
 
             {/* Send the reference, with the scoring options above, to the students. */}
             <fieldset className="flex flex-col gap-3 rounded-md border border-gray-400 p-3">
@@ -1217,14 +1235,23 @@ export default function Shadowing() {
                 <div className="flex flex-wrap items-center gap-3">
                     <button
                         onClick={() => void sendToStudents()}
-                        disabled={!referenceReady || sending || targetedMissing || nothingChecked}
+                        disabled={!canSend || sending}
                         className={`text-white bg-green-600 p-2 rounded-md hover:bg-green-800 ${
-                            !referenceReady || sending || targetedMissing || nothingChecked ? "opacity-50 cursor-not-allowed" : ""
+                            !canSend || sending ? "opacity-50 cursor-not-allowed" : ""
                         }`}
                     >
                         {sending ? "Sending…" : "Send to Students"}
                     </button>
-                    {!referenceReady && <span className="text-sm text-gray-600">Choose or generate the reference first.</span>}
+                    {!referenceReady && !connectedSpeechOnly && (
+                        <span className="text-sm text-gray-600">
+                            Choose or generate the reference first (not needed when only Connected Speech is checked).
+                        </span>
+                    )}
+                    {!referenceReady && connectedSpeechOnly && text !== "" && (
+                        <span className="text-sm text-gray-600">
+                            No reference voice: the students get the sentence only (Connected Speech doesn't use it).
+                        </span>
+                    )}
                     {targetedMissing && (
                         <span className="text-sm text-red-700">
                             Evaluate Connected Speech is on: type at least one targeted word, or untick it.
@@ -1232,7 +1259,7 @@ export default function Shadowing() {
                     )}
                     {nothingChecked && (
                         <span className="text-sm text-red-700">
-                            Nothing to check yet: type targeted words (Connected Speech) or stress words (Scoring options).
+                            Nothing to check yet: type targeted words (Connected Speech) or stress words (Word Stress).
                         </span>
                     )}
                 </div>
@@ -1245,13 +1272,14 @@ export default function Shadowing() {
             </fieldset>
 
             {/* The teacher records the sentence and is scored against the reference with the
-                options above. Nothing goes to the students. */}
+                options above (without one when only Connected Speech is checked). Nothing goes to
+                the students. */}
             <fieldset className="flex flex-col gap-3 rounded-md border border-gray-400 p-3">
                 <legend className="px-1 text-sm font-semibold">Test it yourself</legend>
                 <div className="flex flex-wrap items-center gap-3">
                     <button
                         onClick={recordTest}
-                        disabled={!referenceReady || recorder.recording || recorder.converting || testing}
+                        disabled={!canTest || recorder.recording || recorder.converting || testing}
                         className="px-4 py-2 rounded-md bg-red-600 hover:bg-red-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                         {recorder.take ? "Record again" : "Record"}
@@ -1270,21 +1298,30 @@ export default function Shadowing() {
                         </span>
                     )}
                     {recorder.converting && <span className="text-sm text-gray-600">Preparing the recording…</span>}
-                    {!referenceReady && <span className="text-sm text-gray-600">Choose or generate the reference first.</span>}
+                    {!referenceReady && !connectedSpeechOnly && (
+                        <span className="text-sm text-gray-600">
+                            Choose or generate the reference first (not needed when only Connected Speech is checked).
+                        </span>
+                    )}
+                    {!referenceReady && connectedSpeechOnly && text !== "" && (
+                        <span className="text-sm text-gray-600">
+                            No reference voice: your recording is checked for Connected Speech (and pronunciation) only.
+                        </span>
+                    )}
                 </div>
                 {recorder.take && !recorder.recording && (
                     <div className="flex flex-wrap items-center gap-3">
                         <audio key={recorder.take.url} src={recorder.take.url} controls className="min-w-0 flex-1" />
                         <button
                             onClick={() => void scoreTest()}
-                            disabled={!referenceReady || testing || targetedMissing}
+                            disabled={!canTest || testing || targetedMissing}
                             className="px-4 py-2 rounded-md bg-teal-600 hover:bg-teal-700 text-white font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             {testing ? "Scoring…" : "Score my recording"}
                         </button>
                         {targetedMissing && (
                             <span className="text-sm text-red-700">
-                                Type at least one targeted word (Scoring options), or untick Evaluate Connected Speech.
+                                Type at least one targeted word (Connected Speech), or untick Evaluate Connected Speech.
                             </span>
                         )}
                     </div>
@@ -1316,7 +1353,7 @@ export default function Shadowing() {
                             </span>
                         ) : (
                             <span className="text-sm text-gray-600">
-                                Saves both the <strong>reference audio</strong> and <strong>your recording</strong>, plus the sentence, scoring
+                                Saves {scoredWith.reference ? <>both the <strong>reference audio</strong> and </> : null}<strong>your recording</strong>, plus the sentence, scoring
                                 options and this result, in a new folder (nothing is overwritten).
                             </span>
                         )}
@@ -1339,7 +1376,8 @@ export default function Shadowing() {
 }
 
 // How to adjust the scoring options: what each slider checks, which way is more lenient,
-// worked examples and suggested values. Opened by the Help button next to the stress options.
+// worked examples and suggested values. Opened by the Help button under the Connected Speech and
+// Word Stress sections.
 function ScoringHelp({ onClose }: { onClose: () => void }) {
     const pct = (v: number) => `${Math.round(v * 100)}%`;
     const h = "font-semibold text-gray-900";
@@ -1351,7 +1389,8 @@ function ScoringHelp({ onClose }: { onClose: () => void }) {
         >
             <div className="flex items-start justify-between gap-3">
                 <p>
-                    These settings decide how close a recording must come to the reference. They apply in two
+                    These settings decide how a recording is scored: <strong>Word Stress</strong> compares it with
+                    the reference; <strong>Connected Speech</strong> checks the student's recording on its own. They apply in two
                     places: when you score your own recording with <strong>Test it yourself</strong>, and when you
                     click <strong>Send to Students</strong>. So a test shows you exactly how your students will be
                     scored with the same settings. When you send, the settings are saved with that exercise.
@@ -1365,8 +1404,9 @@ function ScoringHelp({ onClose }: { onClose: () => void }) {
 
             <p className="rounded bg-white px-2 py-1">
                 <strong>Which way is easier?</strong> Melody match: <strong>lower = more lenient</strong>.
-                Linking tolerance: <strong>higher = more lenient</strong>.
             </p>
+
+            <h4 className="border-b border-blue-200 text-base font-bold text-gray-900">Word Stress</h4>
 
             <div>
                 <h5 className={h}>
@@ -1470,24 +1510,22 @@ function ScoringHelp({ onClose }: { onClose: () => void }) {
             </div>
             )}
 
+            <h4 className="border-b border-blue-200 text-base font-bold text-gray-900">Connected Speech</h4>
+
             <div>
-                <h5 className={h}>Linking tolerance (default {DEFAULT_LINK_TOLERANCE}×, shown when Strict connected speech is on)</h5>
+                <h5 className={h}>Linking (targeted words)</h5>
                 <p>
-                    Checks that words the reference speaker joins smoothly (“is_a”, “mother_is”) are joined by the
-                    student too, without a pause. Only the targeted words and the word after each are checked, so
+                    Checks that the student joins the targeted words to the next word smoothly (“is_a”,
+                    “mother_is”), without a pause. It listens to the student's recording only: the reference voice
+                    isn't compared. Only the targeted words and the word after each are checked, so
                     with Evaluate Connected Speech ticked you need at least one targeted word: Send and Score wait
                     until there is one.
                 </p>
-                <p className="mt-1">The number is how much longer a pause between linked words may be than the reference's:</p>
-                <ul className="ml-5 list-disc">
-                    <li>1×: up to {LINK_PAUSE_MARGIN_MS} ms extra pause (very strict, a tiny hesitation counts).</li>
-                    <li>2×: up to {LINK_PAUSE_MARGIN_MS * 2} ms.</li>
-                    <li>3×: up to {LINK_PAUSE_MARGIN_MS * 3} ms.</li>
-                </ul>
                 <p className="mt-1">
-                    Higher values also accept a slightly larger gap and dip in loudness between the words. A missed
-                    link costs 25 points on the first word and 20 on the next. Suggested: <strong>1.5–2×</strong> for
-                    most classes. With Strict connected speech off, linking isn't checked or shown at all.
+                    A link is missed when there's a clear pause or silence between the two words, or the sound
+                    breaks off. The limits are fixed (there's no setting to adjust). A missed link costs 25 points on
+                    the first word and 20 on the next. With Strict connected speech off, linking isn't checked or
+                    shown at all.
                 </p>
             </div>
 
@@ -1496,46 +1534,6 @@ function ScoringHelp({ onClose }: { onClose: () => void }) {
                 go back to the default.
             </p>
         </section>
-    );
-}
-
-// The linking tolerance: how much longer a pause between linked words (e.g. "is_a") may be than
-// the reference's, as a multiplier, with the pause it allows, its default and a reset.
-function LinkToleranceSlider({ value, onChange }: { value: number; onChange: (v: number) => void }) {
-    const pauseMs = (v: number) => Math.round(LINK_PAUSE_MARGIN_MS * v);
-    return (
-        <label
-            className="flex flex-col gap-1"
-            title="How much longer a pause (or a dip in loudness) between linked words may be than in the reference before it counts as not linked. Higher = more lenient."
-        >
-            <span className="text-sm">
-                Linking tolerance: <strong>{value}×</strong> (extra pause up to {pauseMs(value)} ms){" "}
-                <span className="text-gray-600">
-                    (default {DEFAULT_LINK_TOLERANCE}× / {pauseMs(DEFAULT_LINK_TOLERANCE)} ms)
-                </span>
-                {value !== DEFAULT_LINK_TOLERANCE && (
-                    <button
-                        type="button"
-                        onClick={(e) => {
-                            e.preventDefault();
-                            onChange(DEFAULT_LINK_TOLERANCE);
-                        }}
-                        className="ml-1 text-xs text-blue-600 underline"
-                    >
-                        reset
-                    </button>
-                )}
-            </span>
-            <input
-                type="range"
-                min={0.5}
-                max={3}
-                step={0.25}
-                value={value}
-                onChange={(e) => onChange(Number(e.target.value))}
-                className="w-48"
-            />
-        </label>
     );
 }
 

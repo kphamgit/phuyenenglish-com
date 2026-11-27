@@ -9,11 +9,9 @@
 export const DEFAULT_FALL_MATCH_RATIO = 0.75;
 export const DEFAULT_RISE_MATCH_RATIO = 0.5;
 
-// Linking (connected speech) tolerance: a multiplier on how much longer a pause or gap
-// between two linked words may be than in the reference (and how much deeper the dip in
-// loudness). Higher = more lenient; 1 = the service's original limits.
-export const DEFAULT_LINK_TOLERANCE = 1;
-export const LINK_PAUSE_MARGIN_MS = 25; // the extra pause allowed at 1×
+// Linking (connected speech) has no tolerance setting any more: the analyzer's link checker uses
+// its own fixed limits, on the student's recording only (link_tolerance in older results is shown
+// as it was).
 
 // Word Syllables Stress Check: how much of the reference's contrast between the stressed
 // syllable and the unstressed ones (within the word) the student must reach. Lower = more lenient.
@@ -185,7 +183,7 @@ export interface EvaluationResult {
     pronunciation_score_pct: number;
     stress_match_pct: number | null; // the Word Syllables Stress Check score (null when no stress words)
     intonation_score_pct?: number | null; // null when the check doesn't apply
-    connected_speech_summary: string; // e.g. "1 / 1 native links matched"
+    connected_speech_summary: string; // e.g. "1 / 1 targeted links linked"
     // Targeted words whose link can't be checked (missing on older results).
     targeted_word_warnings?: { word: string; problem: 'not_in_sentence' | 'last_word'; message: string }[];
     heard_transcript: string;
@@ -224,7 +222,9 @@ export interface ShadowingResult {
 export interface ShadowingPrompt {
   shadowing_id: string;
   sentence: string;
-  audio_url: string; // presigned S3 url of the reference (valid for an hour)
+  // presigned S3 url of the reference (valid for an hour); null for a connected-speech-only
+  // exercise sent without a reference voice (nothing to listen to)
+  audio_url: string | null;
   stress_words?: string[]; // lower case: the words whose melody is checked
   connected_words?: string[]; // lower case: the targeted words, each should link to the next word
   helper_words?: Record<string, string>; // the teacher's Helper Words by targeted word, e.g. {have: "vờ"}

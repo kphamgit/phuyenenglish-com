@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import api from "../../api";
 import { EvaluationView } from "./EvaluationView";
 import { TargetedSentence } from "./TargetedSentence";
@@ -11,6 +11,11 @@ import { useRecorder } from "./useRecorder";
 // themselves repeating it, sends the recording to Django (/api/shadowing/assess/, scored by
 // VoiceAnalyzer_Claude with the teacher's options), and shows the result in the exercise's place.
 // The teacher gets the same result separately.
+
+// Shown under the sentence when it has links, in place of "Connected words: link them smoothly:" and
+// the list of linked pairs (the arches in the sentence show them).
+const CONNECTED_NOTE =
+    "Các âm nối như : zờ, chờ, chìz, zìz, zo/za.., không phát âm rõ và mạnh như tiếng Việt mà phát âm nhẹ nhàng, lướt qua chữ sau.";
 
 export default function StudentShadowing({ prompt, hidden = false }: { prompt: ShadowingPrompt | null; hidden?: boolean }) {
     const { recording, converting, take, error: recorderError, record: startRecording, stop, reset } = useRecorder();
@@ -84,8 +89,10 @@ export default function StudentShadowing({ prompt, hidden = false }: { prompt: S
         <div className="flex flex-col items-center my-4">
             <div className="w-full max-w-4xl bg-teal-50 border-2 border-teal-400 rounded-lg shadow-lg p-6 flex flex-col gap-3">
                 <p className="text-xs uppercase tracking-wide text-teal-700 font-semibold text-center">
-                    Shadowing: listen, then repeat
+                    {prompt.audio_url ? "Shadowing: listen, then repeat" : "Shadowing: say the sentence"}
                 </p>
+                {/* No reference voice for a connected-speech-only exercise. */}
+                {prompt.audio_url && <ReferencePlayButton src={prompt.audio_url} />}
                 <TargetedSentence
                     sentence={prompt.sentence}
                     stressWords={prompt.stress_words}
@@ -93,9 +100,9 @@ export default function StudentShadowing({ prompt, hidden = false }: { prompt: S
                     helperWords={prompt.helper_words}
                     sentenceViet={prompt.sentence_viet}
                     sentenceVietWords={prompt.sentence_viet_words}
-                    className="text-2xl font-bold text-teal-900 leading-loose text-center"
+                    connectedNote={CONNECTED_NOTE}
+                    className="text-xl font-bold text-teal-900 leading-loose text-center"
                 />
-                <audio src={prompt.audio_url} controls className="w-full" />
 
                 <div className="flex flex-wrap items-center justify-center gap-3">
                     <button
@@ -140,6 +147,42 @@ export default function StudentShadowing({ prompt, hidden = false }: { prompt: S
                 {error && <p className="text-red-600 text-center" role="alert">⚠️ {error}</p>}
 
             </div>
+        </div>
+    );
+}
+
+// The reference audio as a single round Play button (no control bar). Each click plays it from
+// the start; while it plays, the button pulses.
+function ReferencePlayButton({ src }: { src: string }) {
+    const audio = useRef<HTMLAudioElement>(null);
+    const [playing, setPlaying] = useState(false);
+    const play = () => {
+        const el = audio.current;
+        if (!el) return;
+        el.currentTime = 0;
+        el.play().catch((err) => console.error("StudentShadowing: playing the reference failed:", err));
+    };
+    return (
+        <div className="flex justify-center">
+            <audio
+                ref={audio}
+                src={src}
+                preload="auto"
+                onPlay={() => setPlaying(true)}
+                onPause={() => setPlaying(false)}
+                onEnded={() => setPlaying(false)}
+            />
+            <button
+                onClick={play}
+                aria-label="Play the sentence"
+                title="Play the sentence"
+                className={`flex h-7 w-7 items-center justify-center rounded-full bg-teal-600 text-white shadow-md hover:bg-teal-700 ${playing ? "animate-pulse" : ""}`}
+            >
+                {/* A triangle, nudged right so it looks centred in the circle. */}
+                <svg viewBox="0 0 24 24" className="ml-0.5 h-3.5 w-3.5" fill="currentColor" aria-hidden>
+                    <path d="M7 4.5v15a1 1 0 0 0 1.5.86l12-7.5a1 1 0 0 0 0-1.72l-12-7.5A1 1 0 0 0 7 4.5z" />
+                </svg>
+            </button>
         </div>
     );
 }

@@ -253,6 +253,7 @@ export function TargetedSentence({
   helperWords = {},
   sentenceViet,
   sentenceVietWords,
+  connectedNote,
   className = '',
 }: {
   sentence: string;
@@ -267,6 +268,9 @@ export function TargetedSentence({
   // The same codes one per word position, in order (the part of speech from the context), so
   // the same spelling can show two codes. Preferred over sentenceViet when given.
   sentenceVietWords?: VietWord[];
+  // Replaces the key's connected-words line ("Connected words: link them smoothly:" and the linked
+  // pairs) with this text; the links stay marked in the sentence itself.
+  connectedNote?: string;
   className?: string;
 }) {
   const stress = new Set(stressWords.map((w) => w.toLowerCase()));
@@ -299,15 +303,20 @@ export function TargetedSentence({
           )}
           {linkPairs.length > 0 && (
             <span className="leading-loose">
-              <span className="rounded bg-sky-100 px-1">Connected words</span>: link them smoothly:{' '}
-              {linkPairs.map((pair, k) => (
-                <span key={k}>
-                  {k > 0 && ', '}
-                  <strong>
-                    <LinkedText tokens={pair} linksNext={[true, false]} linkSounds={[helperOf(pair[0])]} stress={new Set()} />
-                  </strong>
-                </span>
-              ))}
+              {connectedNote ?? (
+                // The default key: the label, then each linked pair with its arch.
+                <>
+                  <span className="rounded bg-sky-100 px-1">Connected words</span>: link them smoothly:{' '}
+                  {linkPairs.map((pair, k) => (
+                    <span key={k}>
+                      {k > 0 && ', '}
+                      <strong>
+                        <LinkedText tokens={pair} linksNext={[true, false]} linkSounds={[helperOf(pair[0])]} stress={new Set()} />
+                      </strong>
+                    </span>
+                  ))}
+                </>
+              )}
             </span>
           )}
         </div>
