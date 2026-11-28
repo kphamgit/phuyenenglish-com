@@ -54,7 +54,8 @@ export default function QuestionInput({ question, ref, submitted }: QuestionInpu
       return <SRNonContinuous content={content} ref={ref} />;
     case 8:
       return <WordsSelect content={content} ref={ref} />;
-    case 9:
+    case 9:  // Shadowing
+    case 14: // Speaking: a Shadowing without listening (no audio shown)
       return <ShadowingQuestion question={question} ref={ref} />;
     case 10:
       return <DropDowns content={content} ref={ref} />;

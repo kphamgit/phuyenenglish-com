@@ -16,6 +16,7 @@ import { type ProcessQuestionAttemptResultsProps, type QuestionAttemptAssesmentR
 import IncorrectModal from './IncorrectModal';
 import api from '../api';
 import QuestionInput from './QuestionInput';
+import { questionTypeName } from './shared/questionTypes';
 import { useSelector, useDispatch } from 'react-redux';
 //import type { RootState } from '../redux/store';
 import DOMPurify from 'dompurify';
@@ -199,6 +200,11 @@ const handleReviewNo = () => {
   };
 
  const handleSubmit = () => {
+  // A Shadowing (9) or Speaking (14) question is answered by a checked recording (its answer is the take's token).
+  if ((question?.format === 9 || question?.format === 14) && !childRef.current?.getAnswer()) {
+    alert("Record yourself and click “Check my recording” first.");
+    return;
+  }
   setAnswerSubmitted(true);
   const url = `/api/question_attempts/${questionAttemptId}/process/`;
   const uanswer = childRef.current?.getAnswer();
@@ -362,7 +368,7 @@ const handleReviewNo = () => {
             exit={{ opacity: 0, transition: { duration: 0.4 } }}
             className="flex flex-col items-center w-full"
           >
-            <div>Question Number: {question.question_number}</div>
+            <div>Question Number: {question.question_number}{questionTypeName(question?.format) && <span className='ml-2 inline-block rounded-full bg-teal-700 px-2 py-0.5 text-sm font-semibold text-white align-middle'>{questionTypeName(question?.format)}</span>}</div>
             {SafeHTML({ content: question.instructions ?? "" })}
             {question?.prompt && (
               <div className="mb-3 mt-5 text-amber-800 whitespace-pre-wrap">

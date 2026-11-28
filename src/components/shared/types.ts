@@ -154,7 +154,7 @@ export interface QuestionProps {
     // The question's audio (null if none); a Shadowing question (format 9) is repeated after it.
     audio?: { id: number, url: string, text: string } | null,
     hide_text?: boolean,   // format 9: hide the sentence until the student's first take
-    scoring_options?: Record<string, unknown> | null, // format 9: how the recording is scored (server side)
+    scoring_options?: Record<string, unknown> | null, // formats 9 and 14: how the recording is scored (server side)
   }
 
   export interface QuizAttemptProps {

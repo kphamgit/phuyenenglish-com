@@ -7,6 +7,9 @@ import { TargetedSentence } from '../shadowing/TargetedSentence';
 import type { EvaluationResult } from '../shadowing/evaluation';
 import { useRecorder } from '../shadowing/useRecorder';
 
+// A Shadowing question (format 9), or a Speaking question (format 14): the same without
+// listening. The student reads the sentence aloud; the question's audio, if it has one, is only
+// the scoring reference for the stress words, so it's never shown or played here.
 // A Shadowing question (format 9): the student listens to the question's audio, records
 // themselves repeating the sentence (the question's content), and checks the take: Django
 // (/api/shadowing/assess_question/) scores it with VoiceAnalyzer_Claude and the question's scoring
@@ -64,13 +67,17 @@ export default function ShadowingQuestion({ question, ref }: { question: Questio
     }
   };
 
-  const showText = !question.hide_text || result !== null;
+  const speaking = question.format === 14;
+  // A Speaking question has nothing to listen to, so its sentence is always shown.
+  const showText = speaking || !question.hide_text || result !== null;
   const options = question.scoring_options ?? {};
   const t = result?.question_take;
 
   return (
     <div className="flex flex-col gap-3">
-      <p className="text-xs uppercase tracking-wide text-teal-700 font-semibold">Listen, then repeat</p>
+      <p className="text-xs uppercase tracking-wide text-teal-700 font-semibold">
+        {speaking ? 'Read the sentence aloud' : 'Listen, then repeat'}
+      </p>
       {showText ? (
         <TargetedSentence
           sentence={question.content}
@@ -82,11 +89,12 @@ export default function ShadowingQuestion({ question, ref }: { question: Questio
       ) : (
         <p className="text-sm italic text-gray-600">The sentence appears after your first try. Listen carefully.</p>
       )}
-      {question.audio?.url ? (
-        <audio src={question.audio.url} controls className="w-full max-w-xl" />
-      ) : (
-        <p className="text-red-600">This question has no audio.</p>
-      )}
+      {!speaking &&
+        (question.audio?.url ? (
+          <audio src={question.audio.url} controls className="w-full max-w-xl" />
+        ) : (
+          <p className="text-red-600">This question has no audio.</p>
+        ))}
 
       <div className="flex flex-wrap items-center gap-3">
         <button

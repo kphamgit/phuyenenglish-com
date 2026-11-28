@@ -49,7 +49,10 @@ export function PlayButton({
             setFailed(false);
             try {
                 const url = await load();
-                audio.src = url; // set now so play() below has it (React renders the same value)
+                // Set here only, never through the <audio> src prop: React writing it again on the
+                // next render would restart loading and cancel the play() below (the button then
+                // showed the pause sign but stayed silent until a second click).
+                audio.src = url;
                 setLoadedSrc(url);
             } catch (err) {
                 console.error("PlayButton: loading the audio failed:", err);
@@ -62,7 +65,10 @@ export function PlayButton({
         if (playingAudio && playingAudio !== audio) playingAudio.pause();
         playingAudio = audio;
         if (!showTime) audio.currentTime = 0;
-        void audio.play().catch((err) => console.error("PlayButton: can't play the audio:", err));
+        void audio.play().catch((err) => {
+            console.error("PlayButton: can't play the audio:", err);
+            setPlaying(!audio.paused); // don't leave the pause sign on a silent player
+        });
     };
     return (
         <>
@@ -93,7 +99,7 @@ export function PlayButton({
             )}
             <audio
                 ref={audioRef}
-                src={src ?? loadedSrc ?? undefined}
+                src={src} // a loaded audio's (load) src is set in toggle instead, see there
                 preload={showTime && src ? "metadata" : "none"}
                 onPlay={() => setPlaying(true)}
                 onPause={() => setPlaying(false)}

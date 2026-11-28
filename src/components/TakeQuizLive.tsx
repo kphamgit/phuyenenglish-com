@@ -10,6 +10,7 @@ import type { ChildRef } from './TakeQuiz';
 import CorrectModal from './CorrectModal';
 import IncorrectModal from './IncorrectModal';
 import QuestionInput from './QuestionInput';
+import { questionTypeName } from './shared/questionTypes';
 
 import { useSelector } from 'react-redux';
 import { type RootState } from '../redux/store';
@@ -196,8 +197,8 @@ function TakeQuizLive({ live_quiz_id , live_question_number,  parent_callback}: 
 
       const handleSubmit = () => {
            //console.log("TakeQuizLive: handleSubmit called");
-            // A Shadowing question is answered by a checked recording (its answer is the take's token).
-            if (question?.format === 9 && !childRef.current?.getAnswer()) {
+            // A Shadowing (9) or Speaking (14) question is answered by a checked recording (its answer is the take's token).
+            if ((question?.format === 9 || question?.format === 14) && !childRef.current?.getAnswer()) {
               alert("Record yourself and click “Check my recording” first.");
               return;
             }
@@ -281,6 +282,7 @@ function TakeQuizLive({ live_quiz_id , live_question_number,  parent_callback}: 
             <div className="col-span-8 mx-15 my-5 p-10 rounded-md bg-cyan-200">
               <div className="mb-3 text-lg text-amber-800">
                 Question: {question?.question_number}
+                {questionTypeName(question?.format) && <span className='ml-2 inline-block rounded-full bg-teal-700 px-2 py-0.5 text-sm font-semibold text-white align-middle'>{questionTypeName(question?.format)}</span>}
               </div>
               {SafeHTML({ content: question.instructions ?? "" })}
               {question?.prompt && (

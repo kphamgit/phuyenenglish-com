@@ -8,6 +8,7 @@ import DOMPurify from 'dompurify';
 
 import OpenAIStream from './shared/OpenAIStream';
 import QuestionInput from './QuestionInput';
+import { questionTypeName } from './shared/questionTypes';
 import type { ChildRef } from './TakeQuiz';
 import type { UserRowProps } from './context/UserConnectionsContext';
 import CorrectModal from './CorrectModal';
@@ -353,6 +354,7 @@ useEffect(() => {
             <div className="col-span-8 mx-15 my-5 p-10 rounded-md bg-cyan-200">
               <div className="mb-3 text-lg text-amber-800">
                 Question: {question?.question_number}
+                {questionTypeName(question?.format) && <span className='ml-2 inline-block rounded-full bg-teal-700 px-2 py-0.5 text-sm font-semibold text-white align-middle'>{questionTypeName(question?.format)}</span>}
               </div>
               {SafeHTML({ content: question.instructions ?? "" })}
               {question?.prompt && (
